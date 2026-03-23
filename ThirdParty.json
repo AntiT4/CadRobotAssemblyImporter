@@ -1,0 +1,9 @@
+[
+  {
+    "name": "Unreal Engine",
+    "url": "https://www.unrealengine.com/eula",
+    "version": "Project-defined (UE 5.x)",
+    "license": ["Epic Unreal Engine EULA"],
+    "notes": "Unreal Engine is required to build and use this plugin and is not distributed by this repository."
+  }
+]

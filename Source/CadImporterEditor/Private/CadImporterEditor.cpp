@@ -1,4 +1,5 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Hyoseung
 
 #include "CadImporterEditor.h"
 #include "ImportRunner.h"
