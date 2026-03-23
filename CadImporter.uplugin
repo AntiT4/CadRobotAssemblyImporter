@@ -1,0 +1,29 @@
+{
+	"FileVersion": 3,
+	"Version": 900,
+	"VersionName": "0.9.0",
+	"FriendlyName": "CadImporter",
+	"Description": "Supports editor-only import of CAD files using an accompanying JSON description file.",
+	"Category": "Other",
+	"CreatedBy": "Hyoseung",
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": false,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "CadImporter",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "CadImporterEditor",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
+		}
+	]
+}
