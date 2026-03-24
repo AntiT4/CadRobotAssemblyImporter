@@ -2,10 +2,10 @@
 
 #include "CadImporterEditor.h"
 #include "Engine/Blueprint.h"
-#include "Import/AssemblyBuilder.h"
+#include "Import/BlueprintBuilder.h"
 #include "Import/MeshImporter.h"
-#include "Import/PathResolver.h"
-#include "UI/DialogUtils.h"
+#include "Import/PathBuilder.h"
+#include "UI/ImportDialogUtils.h"
 
 namespace CadImportExecutor
 {

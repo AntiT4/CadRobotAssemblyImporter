@@ -1,7 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "MasterJsonWorkspaceService.h"
+#include "WorkspacePrep.h"
 
 class ACadMasterActor;
 struct FCadMasterSelection;

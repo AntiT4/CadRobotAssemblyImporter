@@ -1,4 +1,4 @@
-#include "MasterJsonActorCollector.h"
+#include "MasterSelectionCollector.h"
 
 #include "CadImporterEditor.h"
 #include "Editor/ActorHierarchyUtils.h"

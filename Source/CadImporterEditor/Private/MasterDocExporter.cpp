@@ -1,7 +1,7 @@
-#include "MasterJsonGenerator.h"
+#include "MasterDocExporter.h"
 
 #include "CadMasterActor.h"
-#include "MasterJsonActorCollector.h"
+#include "MasterSelectionCollector.h"
 #include "Dom/JsonObject.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"

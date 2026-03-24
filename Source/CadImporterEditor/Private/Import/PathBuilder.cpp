@@ -1,4 +1,4 @@
-#include "Import/PathResolver.h"
+#include "Import/PathBuilder.h"
 
 #include "Misc/Paths.h"
 

@@ -1,9 +1,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "MasterJsonActorCollector.h"
-#include "MasterChildJsonExtractor.h"
-#include "MasterJsonGenerator.h"
+#include "MasterSelectionCollector.h"
+#include "ChildDocExporter.h"
+#include "MasterDocExporter.h"
 #include "Widgets/SCompoundWidget.h"
 
 class FCadImportService;
