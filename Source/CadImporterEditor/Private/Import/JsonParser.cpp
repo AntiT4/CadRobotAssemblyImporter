@@ -834,7 +834,7 @@ namespace
 	}
 }
 
-bool FCadImportJsonParser::ParseFromFile(const FString& JsonPath, FCadImportModel& OutModel, FString& OutError) const
+bool FCadJsonParser::ParseFromFile(const FString& JsonPath, FCadImportModel& OutModel, FString& OutError) const
 {
 	OutModel = FCadImportModel();
 
@@ -857,7 +857,7 @@ bool FCadImportJsonParser::ParseFromFile(const FString& JsonPath, FCadImportMode
 	return ParseRoot(RootObject, OutModel, OutError);
 }
 
-bool FCadImportJsonParser::ParseRoot(const TSharedPtr<FJsonObject>& RootObject, FCadImportModel& OutModel, FString& OutError) const
+bool FCadJsonParser::ParseRoot(const TSharedPtr<FJsonObject>& RootObject, FCadImportModel& OutModel, FString& OutError) const
 {
 	if (!RootObject.IsValid())
 	{

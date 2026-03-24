@@ -13,7 +13,7 @@
 #include "PhysicsEngine/BodySetup.h"
 #include "StaticMeshEditorSubsystem.h"
 
-bool FCadImportAssetImporter::ImportMeshes(const FCadImportModel& Model, const FCadImportPaths& Paths, const FCadFbxImportOptions& Options, FCadImportResult& OutResult, FString& OutError)
+bool FCadMeshImporter::ImportMeshes(const FCadImportModel& Model, const FCadImportPaths& Paths, const FCadFbxImportOptions& Options, FCadImportResult& OutResult, FString& OutError)
 {
 	OutResult.MeshAssetsByLink.Reset();
 	OutResult.ImportedMeshAssetPaths.Reset();
@@ -43,7 +43,7 @@ bool FCadImportAssetImporter::ImportMeshes(const FCadImportModel& Model, const F
 	return true;
 }
 
-bool FCadImportAssetImporter::ConfigureFbxImportOnce(const FCadFbxImportOptions& Options, FString& OutError)
+bool FCadMeshImporter::ConfigureFbxImportOnce(const FCadFbxImportOptions& Options, FString& OutError)
 {
 	if (CachedFbxImportUI)
 	{
@@ -108,7 +108,7 @@ bool FCadImportAssetImporter::ConfigureFbxImportOnce(const FCadFbxImportOptions&
 	return true;
 }
 
-bool FCadImportAssetImporter::EnsureSimpleCollision(UStaticMesh* StaticMesh, FString& OutError) const
+bool FCadMeshImporter::EnsureSimpleCollision(UStaticMesh* StaticMesh, FString& OutError) const
 {
 	if (!StaticMesh)
 	{
@@ -162,7 +162,7 @@ bool FCadImportAssetImporter::EnsureSimpleCollision(UStaticMesh* StaticMesh, FSt
 	return true;
 }
 
-bool FCadImportAssetImporter::ShouldGenerateSimpleCollisionForModel(const FCadImportModel& Model) const
+bool FCadMeshImporter::ShouldGenerateSimpleCollisionForModel(const FCadImportModel& Model) const
 {
 	// Static actor/static assembly imports should not synthesize broad simple collisions.
 	// They can easily produce oversized hulls for widely separated meshes.
@@ -182,7 +182,7 @@ bool FCadImportAssetImporter::ShouldGenerateSimpleCollisionForModel(const FCadIm
 	return false;
 }
 
-bool FCadImportAssetImporter::ImportMeshForLink(
+bool FCadMeshImporter::ImportMeshForLink(
 	const FCadImportModel& Model,
 	const FCadImportPaths& Paths,
 	const FCadImportLink& Link,

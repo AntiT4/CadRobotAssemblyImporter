@@ -227,7 +227,7 @@ namespace
 	}
 }
 
-bool FCadImportJsonWriter::WriteToString(const FCadImportModel& Model, FString& OutJson, FString& OutError) const
+bool FCadJsonWriter::WriteToString(const FCadImportModel& Model, FString& OutJson, FString& OutError) const
 {
 	if (Model.Links.Num() == 0)
 	{
@@ -303,7 +303,7 @@ bool FCadImportJsonWriter::WriteToString(const FCadImportModel& Model, FString& 
 	return true;
 }
 
-bool FCadImportJsonWriter::WriteToFile(const FCadImportModel& Model, const FString& OutputPath, FString& OutError) const
+bool FCadJsonWriter::WriteToFile(const FCadImportModel& Model, const FString& OutputPath, FString& OutError) const
 {
 	FString JsonText;
 	if (!WriteToString(Model, JsonText, OutError))

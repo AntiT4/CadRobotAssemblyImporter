@@ -67,7 +67,7 @@ namespace
 		return Asset ? Asset->GetOutermost()->GetName() : FString();
 	}
 
-	void FillVisualMaterialOverride(const UStaticMeshComponent* MeshComponent, FCadChildVisualEntry& OutVisual)
+	void FillVisualMaterialOverride(const UStaticMeshComponent* MeshComponent, FCadChildVisual& OutVisual)
 	{
 		if (!MeshComponent)
 		{
@@ -89,7 +89,7 @@ namespace
 		}
 	}
 
-	void AppendVisualsFromActor(const AActor* Actor, TArray<FCadChildVisualEntry>& OutVisuals)
+	void AppendVisualsFromActor(const AActor* Actor, TArray<FCadChildVisual>& OutVisuals)
 	{
 		if (!Actor)
 		{
@@ -115,7 +115,7 @@ namespace
 				continue;
 			}
 
-			FCadChildVisualEntry Visual;
+			FCadChildVisual Visual;
 			Visual.MeshPath = GetAssetPackagePath(StaticMesh);
 			Visual.RelativeTransform = MeshComponent->GetRelativeTransform();
 			FillVisualMaterialOverride(MeshComponent, Visual);
@@ -123,7 +123,7 @@ namespace
 		}
 	}
 
-	void AppendVisualsFromActorRelativeToRoot(const AActor* Actor, const AActor* RootActor, TArray<FCadChildVisualEntry>& OutVisuals)
+	void AppendVisualsFromActorRelativeToRoot(const AActor* Actor, const AActor* RootActor, TArray<FCadChildVisual>& OutVisuals)
 	{
 		if (!Actor || !RootActor)
 		{
@@ -149,7 +149,7 @@ namespace
 				continue;
 			}
 
-			FCadChildVisualEntry Visual;
+			FCadChildVisual Visual;
 			Visual.MeshPath = GetAssetPackagePath(StaticMesh);
 
 			const FTransform VisualWorldTransform = MeshComponent->GetComponentTransform();
@@ -159,7 +159,7 @@ namespace
 		}
 	}
 
-	void AbsorbStaticMeshActorSubtree(AActor* RootActor, AActor* CurrentActor, TArray<FCadChildVisualEntry>& OutVisuals)
+	void AbsorbStaticMeshActorSubtree(AActor* RootActor, AActor* CurrentActor, TArray<FCadChildVisual>& OutVisuals)
 	{
 		if (!CurrentActor || !RootActor)
 		{
@@ -179,7 +179,7 @@ namespace
 		}
 	}
 
-	void AbsorbDirectStaticMeshActorChildren(AActor* RootActor, TArray<FCadChildVisualEntry>& OutVisuals)
+	void AbsorbDirectStaticMeshActorChildren(AActor* RootActor, TArray<FCadChildVisual>& OutVisuals)
 	{
 		if (!RootActor)
 		{
@@ -197,7 +197,7 @@ namespace
 		}
 	}
 
-	void AppendSubtreeVisualsRelativeToRoot(AActor* CurrentActor, const AActor* RootActor, TArray<FCadChildVisualEntry>& OutVisuals)
+	void AppendSubtreeVisualsRelativeToRoot(AActor* CurrentActor, const AActor* RootActor, TArray<FCadChildVisual>& OutVisuals)
 	{
 		if (!CurrentActor || !RootActor)
 		{
@@ -225,7 +225,7 @@ namespace
 		return FindObject<AActor>(nullptr, *TrimmedPath);
 	}
 
-	void CollectChildVisualsForStaticType(AActor* ChildRootActor, FCadChildJsonDocument& InOutChildDocument)
+	void CollectChildVisualsForStaticType(AActor* ChildRootActor, FCadChildDoc& InOutChildDocument)
 	{
 		if (!ChildRootActor)
 		{
@@ -242,7 +242,7 @@ namespace
 		}
 	}
 
-	void CollectRootLinkVisualsForMovableType(AActor* ChildRootActor, TArray<FCadChildVisualEntry>& OutVisuals)
+	void CollectRootLinkVisualsForMovableType(AActor* ChildRootActor, TArray<FCadChildVisual>& OutVisuals)
 	{
 		if (!ChildRootActor)
 		{
@@ -258,7 +258,7 @@ namespace
 		AActor* CurrentActor,
 		AActor* ParentActor,
 		const FTransform& RootRelativeTransform,
-		FCadChildJsonDocument& InOutChildDocument)
+		FCadChildDoc& InOutChildDocument)
 	{
 		if (!CurrentActor)
 		{
@@ -268,7 +268,7 @@ namespace
 		const FString CurrentLinkName = GetActorDisplayNameForMasterChildExtractor(CurrentActor);
 		const bool bIsRoot = (ParentActor == nullptr);
 
-		FCadChildLinkTemplate LinkTemplate;
+		FCadChildLinkDef LinkTemplate;
 		LinkTemplate.LinkName = CurrentLinkName;
 		LinkTemplate.RelativeTransform = bIsRoot
 			? RootRelativeTransform
@@ -279,7 +279,7 @@ namespace
 		if (!bIsRoot)
 		{
 			const FString ParentLinkName = GetActorDisplayNameForMasterChildExtractor(ParentActor);
-			FCadChildJointTemplate JointTemplate;
+			FCadChildJointDef JointTemplate;
 			JointTemplate.JointName = FString::Printf(TEXT("%s_to_%s"), *ParentLinkName, *CurrentLinkName);
 			JointTemplate.JointType = ECadImportJointType::Fixed;
 			JointTemplate.ParentActorName = ParentLinkName;
@@ -302,9 +302,9 @@ namespace
 	}
 
 	void BuildMovableChildTemplate(
-		const FCadMasterChildEntry& ChildEntry,
+		const FCadChildEntry& ChildEntry,
 		AActor* ChildRootActor,
-		FCadChildJsonDocument& InOutChildDocument)
+		FCadChildDoc& InOutChildDocument)
 	{
 		if (!ChildRootActor)
 		{
@@ -323,7 +323,7 @@ namespace
 			return;
 		}
 
-		FCadChildJointTemplate RootAnchorJoint;
+		FCadChildJointDef RootAnchorJoint;
 		RootAnchorJoint.JointName = FString::Printf(TEXT("master_to_%s"), *RootLinkName);
 		RootAnchorJoint.JointType = ECadImportJointType::Fixed;
 		RootAnchorJoint.ParentActorName = TEXT("");
@@ -423,7 +423,7 @@ namespace
 		return TransformObject;
 	}
 
-	TSharedPtr<FJsonObject> MakeJointTemplateObject(const FCadChildJointTemplate& Joint)
+	TSharedPtr<FJsonObject> MakeJointTemplateObject(const FCadChildJointDef& Joint)
 	{
 		TSharedPtr<FJsonObject> JointObject = MakeShared<FJsonObject>();
 		JointObject->SetStringField(TEXT("joint_name"), Joint.JointName);
@@ -450,7 +450,7 @@ namespace
 		return JointObject;
 	}
 
-	TSharedPtr<FJsonObject> MakeChildVisualObject(const FCadChildVisualEntry& Visual)
+	TSharedPtr<FJsonObject> MakeChildVisualObject(const FCadChildVisual& Visual)
 	{
 		TSharedPtr<FJsonObject> VisualObject = MakeShared<FJsonObject>();
 		VisualObject->SetStringField(TEXT("mesh_path"), Visual.MeshPath);
@@ -460,14 +460,14 @@ namespace
 		return VisualObject;
 	}
 
-	TSharedPtr<FJsonObject> MakeChildLinkObject(const FCadChildLinkTemplate& LinkTemplate)
+	TSharedPtr<FJsonObject> MakeChildLinkObject(const FCadChildLinkDef& LinkTemplate)
 	{
 		TSharedPtr<FJsonObject> LinkObject = MakeShared<FJsonObject>();
 		LinkObject->SetStringField(TEXT("link_name"), LinkTemplate.LinkName);
 		LinkObject->SetObjectField(TEXT("relative_transform"), MakeMasterChildExtractorTransformObject(LinkTemplate.RelativeTransform));
 
 		TArray<TSharedPtr<FJsonValue>> VisualValues;
-		for (const FCadChildVisualEntry& Visual : LinkTemplate.Visuals)
+		for (const FCadChildVisual& Visual : LinkTemplate.Visuals)
 		{
 			VisualValues.Add(MakeShared<FJsonValueObject>(MakeChildVisualObject(Visual)));
 		}
@@ -475,12 +475,12 @@ namespace
 		return LinkObject;
 	}
 
-	FCadChildJsonDocument BuildChildDocumentTemplate(
-		const FCadMasterJsonDocument& MasterDocument,
-		const FCadMasterChildEntry& ChildEntry,
+	FCadChildDoc BuildChildDocumentTemplate(
+		const FCadMasterDoc& MasterDocument,
+		const FCadChildEntry& ChildEntry,
 		AActor* ChildRootActor)
 	{
-		FCadChildJsonDocument ChildDocument;
+		FCadChildDoc ChildDocument;
 		ChildDocument.MasterName = MasterDocument.MasterName;
 		ChildDocument.ChildActorName = ChildEntry.ActorName;
 		ChildDocument.SourceActorPath = ChildEntry.ActorPath;
@@ -519,7 +519,7 @@ namespace
 		return ChildDocument;
 	}
 
-	bool TrySerializeChildDocument(const FCadChildJsonDocument& ChildDocument, FString& OutJson, FString& OutError)
+	bool TrySerializeChildDocument(const FCadChildDoc& ChildDocument, FString& OutJson, FString& OutError)
 	{
 		TSharedPtr<FJsonObject> RootObject = MakeShared<FJsonObject>();
 		RootObject->SetStringField(TEXT("master_name"), ChildDocument.MasterName);
@@ -534,21 +534,21 @@ namespace
 		RootObject->SetObjectField(TEXT("physics"), PhysicsObject);
 
 		TArray<TSharedPtr<FJsonValue>> VisualValues;
-		for (const FCadChildVisualEntry& Visual : ChildDocument.Visuals)
+		for (const FCadChildVisual& Visual : ChildDocument.Visuals)
 		{
 			VisualValues.Add(MakeShared<FJsonValueObject>(MakeChildVisualObject(Visual)));
 		}
 		RootObject->SetArrayField(TEXT("visuals"), VisualValues);
 
 		TArray<TSharedPtr<FJsonValue>> LinkValues;
-		for (const FCadChildLinkTemplate& LinkTemplate : ChildDocument.Links)
+		for (const FCadChildLinkDef& LinkTemplate : ChildDocument.Links)
 		{
 			LinkValues.Add(MakeShared<FJsonValueObject>(MakeChildLinkObject(LinkTemplate)));
 		}
 		RootObject->SetArrayField(TEXT("links"), LinkValues);
 
 		TArray<TSharedPtr<FJsonValue>> JointValues;
-		for (const FCadChildJointTemplate& Joint : ChildDocument.Joints)
+		for (const FCadChildJointDef& Joint : ChildDocument.Joints)
 		{
 			JointValues.Add(MakeShared<FJsonValueObject>(MakeJointTemplateObject(Joint)));
 		}
@@ -565,7 +565,7 @@ namespace
 		return true;
 	}
 
-	bool TryWriteChildDocumentToFile(const FCadChildJsonDocument& ChildDocument, const FString& OutputPath, FString& OutError)
+	bool TryWriteChildDocumentToFile(const FCadChildDoc& ChildDocument, const FString& OutputPath, FString& OutError)
 	{
 		FString JsonText;
 		if (!TrySerializeChildDocument(ChildDocument, JsonText, OutError))
@@ -610,10 +610,10 @@ namespace CadChildJsonService
 {
 	bool TryParseMasterDocument(
 		const FString& MasterJsonPath,
-		FCadMasterJsonDocument& OutDocument,
+		FCadMasterDoc& OutDocument,
 		FString& OutError)
 	{
-		OutDocument = FCadMasterJsonDocument();
+		OutDocument = FCadMasterDoc();
 		OutError.Reset();
 
 		FString JsonText;
@@ -675,7 +675,7 @@ namespace CadChildJsonService
 				return false;
 			}
 
-			FCadMasterChildEntry ChildEntry;
+			FCadChildEntry ChildEntry;
 			if (!ChildObject->TryGetStringField(TEXT("actor_name"), ChildEntry.ActorName))
 			{
 				OutError = FString::Printf(TEXT("Child entry %d is missing 'actor_name'."), ChildIndex);
@@ -738,7 +738,7 @@ namespace CadChildJsonService
 
 	bool TryExtractChildJsonFilesFromDocument(
 		const FString& MasterJsonPath,
-		const FCadMasterJsonDocument& MasterDocument,
+		const FCadMasterDoc& MasterDocument,
 		FCadChildJsonResult& OutResult,
 		FString& OutError)
 	{
@@ -757,10 +757,10 @@ namespace CadChildJsonService
 		}
 
 		TArray<FString> GeneratedChildJsonPaths;
-		for (const FCadMasterChildEntry& ChildEntry : MasterDocument.Children)
+		for (const FCadChildEntry& ChildEntry : MasterDocument.Children)
 		{
 			AActor* ChildRootActor = ResolveActorByPath(ChildEntry.ActorPath);
-			FCadChildJsonDocument ChildDocument = BuildChildDocumentTemplate(MasterDocument, ChildEntry, ChildRootActor);
+			FCadChildDoc ChildDocument = BuildChildDocumentTemplate(MasterDocument, ChildEntry, ChildRootActor);
 
 			FString ChildFileName = ChildEntry.ChildJsonFileName.TrimStartAndEnd();
 			if (ChildFileName.IsEmpty())
@@ -794,7 +794,7 @@ namespace CadChildJsonService
 		FCadChildJsonResult& OutResult,
 		FString& OutError)
 	{
-		FCadMasterJsonDocument MasterDocument;
+		FCadMasterDoc MasterDocument;
 		if (!TryParseMasterDocument(MasterJsonPath, MasterDocument, OutError))
 		{
 			return false;

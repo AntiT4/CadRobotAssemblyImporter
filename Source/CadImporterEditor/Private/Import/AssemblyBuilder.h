@@ -5,10 +5,10 @@
 
 class UBlueprint;
 
-class FCadImportAssemblyBuilder
+class FCadBlueprintBuilder
 {
 public:
-	UBlueprint* BuildRobotBlueprint(
+	UBlueprint* BuildBlueprint(
 		const FCadImportModel& Model,
 		const FCadImportPaths& Paths,
 		const FCadImportResult& ImportResult,

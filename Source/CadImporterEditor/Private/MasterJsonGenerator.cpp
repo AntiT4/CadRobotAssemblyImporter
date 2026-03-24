@@ -51,7 +51,7 @@ namespace
 		return TransformObject;
 	}
 
-	TSharedPtr<FJsonObject> MakeMasterChildObject(const FCadMasterChildEntry& ChildEntry)
+	TSharedPtr<FJsonObject> MakeMasterChildObject(const FCadChildEntry& ChildEntry)
 	{
 		TSharedPtr<FJsonObject> ChildObject = MakeShared<FJsonObject>();
 		ChildObject->SetStringField(TEXT("actor_name"), ChildEntry.ActorName);
@@ -61,7 +61,7 @@ namespace
 		return ChildObject;
 	}
 
-	bool TrySerializeMasterDocument(const FCadMasterJsonDocument& Document, FString& OutJson, FString& OutError)
+	bool TrySerializeMasterDocument(const FCadMasterDoc& Document, FString& OutJson, FString& OutError)
 	{
 		TSharedPtr<FJsonObject> RootObject = MakeShared<FJsonObject>();
 		RootObject->SetStringField(TEXT("master_name"), Document.MasterName);
@@ -72,7 +72,7 @@ namespace
 		RootObject->SetStringField(TEXT("content_root_path"), Document.ContentRootPath);
 
 		TArray<TSharedPtr<FJsonValue>> ChildValues;
-		for (const FCadMasterChildEntry& ChildEntry : Document.Children)
+		for (const FCadChildEntry& ChildEntry : Document.Children)
 		{
 			ChildValues.Add(MakeShared<FJsonValueObject>(MakeMasterChildObject(ChildEntry)));
 		}
@@ -123,7 +123,7 @@ namespace
 		AActor& MasterActor,
 		const FCadMasterSelection& SelectionResult,
 		const FCadWorkspacePaths& WorkspacePaths,
-		FCadMasterJsonDocument& OutDocument,
+		FCadMasterDoc& OutDocument,
 		FString& OutError)
 	{
 		if (!SelectionResult.IsValid())
@@ -132,7 +132,7 @@ namespace
 			return false;
 		}
 
-		OutDocument = FCadMasterJsonDocument();
+		OutDocument = FCadMasterDoc();
 		OutDocument.MasterName = WorkspacePaths.MasterName;
 		OutDocument.MasterActorPath = MasterActor.GetPathName();
 		OutDocument.MasterWorldTransform = MasterActor.GetActorTransform();
@@ -159,7 +159,7 @@ namespace
 			return false;
 		}
 
-		FCadMasterJsonDocument Document;
+		FCadMasterDoc Document;
 		if (!TryBuildDocument(MasterActor, SelectionResult, WorkspacePaths, Document, OutError))
 		{
 			return false;
@@ -236,7 +236,7 @@ namespace CadMasterJsonGenerator
 		return TryGenerateInternal(*MasterActor, SelectionResult, WorkspaceFolderOverride, OutResult, OutError);
 	}
 
-	bool TryWriteDocument(const FCadMasterJsonDocument& Document, const FString& OutputPath, FString& OutError)
+	bool TryWriteDocument(const FCadMasterDoc& Document, const FString& OutputPath, FString& OutError)
 	{
 		FString JsonText;
 		if (!TrySerializeMasterDocument(Document, JsonText, OutError))

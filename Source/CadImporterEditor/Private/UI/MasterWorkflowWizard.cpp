@@ -715,7 +715,7 @@ void SCadWorkflowWizard::SetChildType(const int32 ChildIndex, const FString& Sel
 	ChildEntries[ChildIndex].ActorType = ParsedType;
 }
 
-AActor* SCadWorkflowWizard::FindChildActor(const FCadMasterChildEntry& ChildEntry) const
+AActor* SCadWorkflowWizard::FindChildActor(const FCadChildEntry& ChildEntry) const
 {
 	if (ChildEntry.ActorPath.TrimStartAndEnd().IsEmpty())
 	{
@@ -730,7 +730,7 @@ void SCadWorkflowWizard::SaveChildVisibility()
 	SavedVisibility.Reset();
 	TArray<AActor*> HierarchyActors;
 
-	for (const FCadMasterChildEntry& ChildEntry : ChildEntries)
+	for (const FCadChildEntry& ChildEntry : ChildEntries)
 	{
 		AActor* ChildActor = FindChildActor(ChildEntry);
 		if (!ChildActor)
@@ -944,7 +944,7 @@ FReply SCadWorkflowWizard::ConfirmMaster()
 	IsolatedIndex = INDEX_NONE;
 	MasterJsonResult = FCadMasterJsonGenerationResult();
 	ChildJsonResult = FCadChildJsonResult();
-	BuildInput = FCadMasterWorkflowBuildInput();
+	BuildInput = FCadWorkflowBuildInput();
 	RebuildChildRows();
 
 	const AActor* ConfirmedMasterActor = ConfirmedSelection.MasterActor.Get();
@@ -1070,7 +1070,7 @@ FReply SCadWorkflowWizard::RestartWorkflow()
 	IsolatedIndex = INDEX_NONE;
 	MasterJsonResult = FCadMasterJsonGenerationResult();
 	ChildJsonResult = FCadChildJsonResult();
-	BuildInput = FCadMasterWorkflowBuildInput();
+	BuildInput = FCadWorkflowBuildInput();
 	RebuildChildRows();
 	SetStep(0);
 	SetStatus(TEXT("Workflow restarted. Step 1: Set workspace folder."));

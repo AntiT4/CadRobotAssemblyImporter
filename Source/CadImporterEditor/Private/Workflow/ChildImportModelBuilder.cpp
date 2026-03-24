@@ -13,9 +13,9 @@ namespace
 		InOutModel.Units.MeshScale = 1.0f;
 	}
 
-	FString ResolveChildRootLinkName(const FCadChildJsonDocument& ChildDocument, const FCadMasterChildEntry& ChildEntry)
+	FString ResolveChildRootLinkName(const FCadChildDoc& ChildDocument, const FCadChildEntry& ChildEntry)
 	{
-		for (const FCadChildLinkTemplate& LinkTemplate : ChildDocument.Links)
+		for (const FCadChildLinkDef& LinkTemplate : ChildDocument.Links)
 		{
 			const FString LinkName = LinkTemplate.LinkName.TrimStartAndEnd();
 			if (!LinkName.IsEmpty())
@@ -33,9 +33,9 @@ namespace
 		return ChildEntry.ActorName.TrimStartAndEnd();
 	}
 
-	void AppendChildVisualsToLink(const TArray<FCadChildVisualEntry>& ChildVisuals, FCadImportLink& OutLink)
+	void AppendChildVisualsToLink(const TArray<FCadChildVisual>& ChildVisuals, FCadImportLink& OutLink)
 	{
-		for (const FCadChildVisualEntry& ChildVisual : ChildVisuals)
+		for (const FCadChildVisual& ChildVisual : ChildVisuals)
 		{
 			FCadImportVisual Visual;
 			Visual.MeshPath = ChildVisual.MeshPath;
@@ -50,8 +50,8 @@ namespace
 namespace CadChildImportModelBuilder
 {
 	bool TryBuildImportModel(
-		const FCadMasterChildEntry& ChildEntry,
-		const FCadChildJsonDocument& ChildDocument,
+		const FCadChildEntry& ChildEntry,
+		const FCadChildDoc& ChildDocument,
 		const FString& ChildJsonFolderPath,
 		const FString& OutputRootPath,
 		FCadImportModel& OutModel,
@@ -80,7 +80,7 @@ namespace CadChildImportModelBuilder
 
 		if (ChildDocument.Links.Num() > 0)
 		{
-			for (const FCadChildLinkTemplate& LinkTemplate : ChildDocument.Links)
+			for (const FCadChildLinkDef& LinkTemplate : ChildDocument.Links)
 			{
 				const FString LinkName = LinkTemplate.LinkName.TrimStartAndEnd();
 				if (LinkName.IsEmpty())
@@ -118,7 +118,7 @@ namespace CadChildImportModelBuilder
 			LinksByName.Add(Link.Name, Link);
 		}
 
-		for (const FCadChildJointTemplate& JointTemplate : ChildDocument.Joints)
+		for (const FCadChildJointDef& JointTemplate : ChildDocument.Joints)
 		{
 			const FString RawParentName = JointTemplate.ParentActorName.TrimStartAndEnd();
 			const FString ParentName = RawParentName.IsEmpty() ? TEXT("master") : RawParentName;

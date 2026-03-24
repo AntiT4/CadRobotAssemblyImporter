@@ -245,7 +245,7 @@ namespace CadImportDialogUtils
 		FString& OutError)
 	{
 		FCadImportModel Model;
-		FCadImportJsonParser Parser;
+		FCadJsonParser Parser;
 		if (!Parser.ParseFromFile(JsonPath, Model, OutError))
 		{
 			return false;

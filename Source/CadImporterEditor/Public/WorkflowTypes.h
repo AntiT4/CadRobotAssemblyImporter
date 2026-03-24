@@ -9,7 +9,7 @@ enum class ECadMasterChildActorType : uint8
 	Movable
 };
 
-struct FCadMasterChildEntry
+struct FCadChildEntry
 {
 	FString ActorName;
 	FString ActorPath;
@@ -18,7 +18,7 @@ struct FCadMasterChildEntry
 	FString ChildJsonFileName;
 };
 
-struct FCadMasterJsonDocument
+struct FCadMasterDoc
 {
 	FString MasterName;
 	FString MasterActorPath;
@@ -26,10 +26,10 @@ struct FCadMasterJsonDocument
 	FString WorkspaceFolder;
 	FString ChildJsonFolderName;
 	FString ContentRootPath;
-	TArray<FCadMasterChildEntry> Children;
+	TArray<FCadChildEntry> Children;
 };
 
-struct FCadChildVisualEntry
+struct FCadChildVisual
 {
 	FString MeshPath;
 	FTransform RelativeTransform = FTransform::Identity;
@@ -37,7 +37,7 @@ struct FCadChildVisualEntry
 	FString MaterialName;
 };
 
-struct FCadChildJointTemplate
+struct FCadChildJointDef
 {
 	FString JointName;
 	ECadImportJointType JointType = ECadImportJointType::Fixed;
@@ -47,14 +47,14 @@ struct FCadChildJointTemplate
 	FCadImportJointLimit Limit;
 };
 
-struct FCadChildLinkTemplate
+struct FCadChildLinkDef
 {
 	FString LinkName;
 	FTransform RelativeTransform = FTransform::Identity;
-	TArray<FCadChildVisualEntry> Visuals;
+	TArray<FCadChildVisual> Visuals;
 };
 
-struct FCadChildJsonDocument
+struct FCadChildDoc
 {
 	FString MasterName;
 	FString ChildActorName;
@@ -62,12 +62,12 @@ struct FCadChildJsonDocument
 	ECadMasterChildActorType ActorType = ECadMasterChildActorType::Static;
 	FTransform RelativeTransform = FTransform::Identity;
 	FCadImportPhysics Physics;
-	TArray<FCadChildLinkTemplate> Links;
-	TArray<FCadChildVisualEntry> Visuals;
-	TArray<FCadChildJointTemplate> Joints;
+	TArray<FCadChildLinkDef> Links;
+	TArray<FCadChildVisual> Visuals;
+	TArray<FCadChildJointDef> Joints;
 };
 
-struct FCadMasterWorkflowBuildInput
+struct FCadWorkflowBuildInput
 {
 	FString WorkspaceFolder;
 	FString MasterJsonPath;

@@ -28,7 +28,7 @@ private:
 	void RefreshSelectionPreview();
 	void RebuildChildRows();
 	void SetChildType(const int32 ChildIndex, const FString& SelectedType);
-	AActor* FindChildActor(const FCadMasterChildEntry& ChildEntry) const;
+	AActor* FindChildActor(const FCadChildEntry& ChildEntry) const;
 	void SaveChildVisibility();
 	void IsolateChildVisibility(const int32 ChildIndex);
 	void RestoreChildVisibilityState();
@@ -57,12 +57,12 @@ private:
 	int32 StepIndex = 0;
 	TArray<TSharedPtr<FString>> ChildTypeItems;
 	FCadMasterSelection ConfirmedSelection;
-	TArray<FCadMasterChildEntry> ChildEntries;
+	TArray<FCadChildEntry> ChildEntries;
 	TMap<FString, bool> SavedVisibility;
 	int32 IsolatedIndex = INDEX_NONE;
 
 	FCadMasterJsonGenerationResult MasterJsonResult;
 	FCadChildJsonResult ChildJsonResult;
-	FCadMasterWorkflowBuildInput BuildInput;
+	FCadWorkflowBuildInput BuildInput;
 	FCadFbxImportOptions ImportOptions;
 };

@@ -5,7 +5,7 @@
 
 class FJsonObject;
 
-class FCadImportJsonParser
+class FCadJsonParser
 {
 public:
 	bool ParseFromFile(const FString& JsonPath, FCadImportModel& OutModel, FString& OutError) const;

@@ -3,7 +3,7 @@
 #include "CoreMinimal.h"
 #include "ImportModelTypes.h"
 
-class FCadImportJsonWriter
+class FCadJsonWriter
 {
 public:
 	bool WriteToString(const FCadImportModel& Model, FString& OutJson, FString& OutError) const;

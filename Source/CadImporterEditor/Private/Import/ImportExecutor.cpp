@@ -19,10 +19,10 @@ namespace CadImportExecutor
 		OutError.Reset();
 		CadImportDialogUtils::LogModel(Model, SourceLabel);
 
-		const FCadImportPathResolver PathResolver;
-		const FCadImportPaths Paths = PathResolver.BuildPaths(Model);
+		const FCadPathBuilder PathBuilder;
+		const FCadImportPaths Paths = PathBuilder.Build(Model);
 
-		FCadImportAssetImporter AssetImporter;
+		FCadMeshImporter MeshImporter;
 		FCadImportResult ImportResult;
 		UE_LOG(LogCadImporter, Display, TEXT("FBX Import Effective Options: convert_scene=%s force_front_x_axis=%s convert_scene_unit=%s combine_meshes=%s auto_collision=%s nanite=%s scale=%.4f translation=%s rotation=%s"),
 			ImportOptions.bConvertScene ? TEXT("true") : TEXT("false"),
@@ -35,7 +35,7 @@ namespace CadImportExecutor
 			*CadImportDialogUtils::FormatVector(ImportOptions.ImportTranslation),
 			*CadImportDialogUtils::FormatRotator(ImportOptions.ImportRotation));
 
-		if (!AssetImporter.ImportMeshes(Model, Paths, ImportOptions, ImportResult, OutError))
+		if (!MeshImporter.ImportMeshes(Model, Paths, ImportOptions, ImportResult, OutError))
 		{
 			return false;
 		}
@@ -46,8 +46,8 @@ namespace CadImportExecutor
 			return false;
 		}
 
-		FCadImportAssemblyBuilder AssemblyBuilder;
-		UBlueprint* RobotBlueprint = AssemblyBuilder.BuildRobotBlueprint(Model, Paths, ImportResult, OutError);
+		FCadBlueprintBuilder BlueprintBuilder;
+		UBlueprint* RobotBlueprint = BlueprintBuilder.BuildBlueprint(Model, Paths, ImportResult, OutError);
 		if (!RobotBlueprint)
 		{
 			return false;

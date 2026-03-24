@@ -558,7 +558,7 @@ namespace
 	}
 }
 
-UBlueprint* FCadImportAssemblyBuilder::BuildRobotBlueprint(
+UBlueprint* FCadBlueprintBuilder::BuildBlueprint(
 	const FCadImportModel& Model,
 	const FCadImportPaths& Paths,
 	const FCadImportResult& ImportResult,
@@ -624,7 +624,7 @@ UBlueprint* FCadImportAssemblyBuilder::BuildRobotBlueprint(
 	return Blueprint;
 }
 
-bool FCadImportAssemblyBuilder::BuildComponents(
+bool FCadBlueprintBuilder::BuildComponents(
 	UBlueprint* Blueprint,
 	const FCadImportModel& Model,
 	const FCadImportResult& ImportResult,

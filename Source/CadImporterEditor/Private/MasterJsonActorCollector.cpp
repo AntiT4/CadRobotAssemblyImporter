@@ -41,16 +41,16 @@ namespace
 		InOutResult.Issues.Add(MoveTemp(Violation));
 	}
 
-	void ValidateDuplicateNames(const TArray<FCadMasterChildEntry>& Children, FCadMasterSelection& InOutResult)
+	void ValidateDuplicateNames(const TArray<FCadChildEntry>& Children, FCadMasterSelection& InOutResult)
 	{
 		TMap<FString, int32> NameUseCount;
-		for (const FCadMasterChildEntry& ChildEntry : Children)
+		for (const FCadChildEntry& ChildEntry : Children)
 		{
 			int32& UseCount = NameUseCount.FindOrAdd(ChildEntry.ActorName);
 			++UseCount;
 		}
 
-		for (const FCadMasterChildEntry& ChildEntry : Children)
+		for (const FCadChildEntry& ChildEntry : Children)
 		{
 			const int32* UseCount = NameUseCount.Find(ChildEntry.ActorName);
 			if (!UseCount || *UseCount <= 1)
@@ -219,7 +219,7 @@ namespace CadMasterSelection
 				continue;
 			}
 
-			FCadMasterChildEntry ChildEntry;
+			FCadChildEntry ChildEntry;
 			ChildEntry.ActorName = GetMasterWorkflowActorDisplayName(ChildActor);
 			ChildEntry.ActorPath = ChildActor->GetPathName();
 			ChildEntry.RelativeTransform = ChildActor->GetActorTransform().GetRelativeTransform(MasterActor->GetActorTransform());

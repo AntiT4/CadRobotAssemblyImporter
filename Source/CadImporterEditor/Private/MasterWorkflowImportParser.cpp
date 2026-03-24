@@ -144,9 +144,9 @@ namespace
 		return false;
 	}
 
-	FString ResolveRootLinkName(const FCadChildJsonDocument& ChildDocument)
+	FString ResolveRootLinkName(const FCadChildDoc& ChildDocument)
 	{
-		for (const FCadChildLinkTemplate& LinkTemplate : ChildDocument.Links)
+		for (const FCadChildLinkDef& LinkTemplate : ChildDocument.Links)
 		{
 			const FString LinkName = LinkTemplate.LinkName.TrimStartAndEnd();
 			if (!LinkName.IsEmpty())
@@ -163,10 +163,10 @@ namespace CadMasterWorkflowImportParser
 {
 	bool TryLoadChildDocumentFromJsonPath(
 		const FString& ChildJsonPath,
-		FCadChildJsonDocument& OutDocument,
+		FCadChildDoc& OutDocument,
 		FString& OutError)
 	{
-		OutDocument = FCadChildJsonDocument();
+		OutDocument = FCadChildDoc();
 		OutError.Reset();
 
 		FString JsonText;
@@ -237,7 +237,7 @@ namespace CadMasterWorkflowImportParser
 					return false;
 				}
 
-				FCadChildVisualEntry VisualEntry;
+				FCadChildVisual VisualEntry;
 				VisualObject->TryGetStringField(TEXT("mesh_path"), VisualEntry.MeshPath);
 				VisualObject->TryGetStringField(TEXT("material_path"), VisualEntry.MaterialPath);
 				VisualObject->TryGetStringField(TEXT("material_name"), VisualEntry.MaterialName);
@@ -276,7 +276,7 @@ namespace CadMasterWorkflowImportParser
 					return false;
 				}
 
-				FCadChildLinkTemplate LinkTemplate;
+				FCadChildLinkDef LinkTemplate;
 				LinkObject->TryGetStringField(TEXT("link_name"), LinkTemplate.LinkName);
 
 				const TSharedPtr<FJsonObject>* LinkTransformObject = nullptr;
@@ -309,7 +309,7 @@ namespace CadMasterWorkflowImportParser
 							return false;
 						}
 
-						FCadChildVisualEntry VisualEntry;
+						FCadChildVisual VisualEntry;
 						VisualObject->TryGetStringField(TEXT("mesh_path"), VisualEntry.MeshPath);
 						VisualObject->TryGetStringField(TEXT("material_path"), VisualEntry.MaterialPath);
 						VisualObject->TryGetStringField(TEXT("material_name"), VisualEntry.MaterialName);
@@ -357,7 +357,7 @@ namespace CadMasterWorkflowImportParser
 					return false;
 				}
 
-				FCadChildJointTemplate JointTemplate;
+				FCadChildJointDef JointTemplate;
 				JointObject->TryGetStringField(TEXT("joint_name"), JointTemplate.JointName);
 				JointObject->TryGetStringField(TEXT("parent_actor_name"), JointTemplate.ParentActorName);
 				JointObject->TryGetStringField(TEXT("child_actor_name"), JointTemplate.ChildActorName);

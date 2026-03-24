@@ -84,7 +84,7 @@ bool FCadImportService::RunImport(const FString& JsonPath, const FCadFbxImportOp
 {
 	FCadImportModel Model;
 	FString Error;
-	FCadImportJsonParser Parser;
+	FCadJsonParser Parser;
 	if (!Parser.ParseFromFile(JsonPath, Model, Error))
 	{
 		return ReportFailure(TEXT("CAD json parse failed"), TEXT("JSON parse failed"), Error);
@@ -98,7 +98,7 @@ bool FCadImportService::RunImport(const FString& JsonPath, const FCadFbxImportOp
 	return true;
 }
 
-bool FCadImportService::BuildFromWorkflow(const FCadMasterWorkflowBuildInput& BuildInput, const FCadFbxImportOptions& ImportOptions) const
+bool FCadImportService::BuildFromWorkflow(const FCadWorkflowBuildInput& BuildInput, const FCadFbxImportOptions& ImportOptions) const
 {
 	FString Error;
 	const FString MasterJsonPath = BuildInput.MasterJsonPath.TrimStartAndEnd();
@@ -107,13 +107,13 @@ bool FCadImportService::BuildFromWorkflow(const FCadMasterWorkflowBuildInput& Bu
 		return ReportFailure(TEXT("Master workflow build failed"), TEXT("Master workflow build failed"), TEXT("MasterJsonPath is empty."));
 	}
 
-	FCadMasterJsonDocument MasterDocument;
+	FCadMasterDoc MasterDocument;
 	if (!CadChildJsonService::TryParseMasterDocument(MasterJsonPath, MasterDocument, Error))
 	{
 		return ReportFailure(TEXT("Master workflow parse failed"), TEXT("Master workflow parse failed"), Error);
 	}
 
-	FCadMasterWorkflowBuildInput ResolvedBuildInput = BuildInput;
+	FCadWorkflowBuildInput ResolvedBuildInput = BuildInput;
 	ResolvedBuildInput.MasterJsonPath = MasterJsonPath;
 	ResolvedBuildInput = CadWorkflowBuildInputResolver::Resolve(ResolvedBuildInput, MasterDocument);
 	const FString ChildBlueprintOutputRoot = ResolvedBuildInput.ContentRootPath.TrimStartAndEnd();
@@ -125,7 +125,7 @@ bool FCadImportService::BuildFromWorkflow(const FCadMasterWorkflowBuildInput& Bu
 	}
 
 	TMap<FString, UBlueprint*> ChildBlueprintsByChildName;
-	for (const FCadMasterChildEntry& ChildEntry : MasterDocument.Children)
+	for (const FCadChildEntry& ChildEntry : MasterDocument.Children)
 	{
 		const FString ChildName = ChildEntry.ActorName.TrimStartAndEnd();
 		const FString ChildJsonFileName = ChildEntry.ChildJsonFileName.TrimStartAndEnd();
@@ -142,7 +142,7 @@ bool FCadImportService::BuildFromWorkflow(const FCadMasterWorkflowBuildInput& Bu
 		}
 
 		const FString ChildJsonPath = FPaths::ConvertRelativePathToFull(FPaths::Combine(ResolvedBuildInput.ChildJsonFolderPath, ChildJsonFileName));
-		FCadChildJsonDocument ChildDocument;
+		FCadChildDoc ChildDocument;
 		if (!CadMasterWorkflowImportParser::TryLoadChildDocumentFromJsonPath(ChildJsonPath, ChildDocument, Error))
 		{
 			return ReportFailure(

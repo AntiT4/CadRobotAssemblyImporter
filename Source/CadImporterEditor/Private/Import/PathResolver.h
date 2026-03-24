@@ -3,10 +3,10 @@
 #include "CoreMinimal.h"
 #include "ImportModelTypes.h"
 
-class FCadImportPathResolver
+class FCadPathBuilder
 {
 public:
-	FCadImportPaths BuildPaths(const FCadImportModel& Model) const;
+	FCadImportPaths Build(const FCadImportModel& Model) const;
 
 private:
 	FString MakeLinkFolderPath(const FString& RootFolderPath, const FString& RobotName, const FString& LinkName, bool bUseRobotSubfolder) const;

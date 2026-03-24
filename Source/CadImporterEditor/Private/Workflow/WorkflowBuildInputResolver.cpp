@@ -5,8 +5,8 @@
 namespace
 {
 	FString ResolveWorkspaceFolder(
-		const FCadMasterWorkflowBuildInput& BuildInput,
-		const FCadMasterJsonDocument& MasterDocument)
+		const FCadWorkflowBuildInput& BuildInput,
+		const FCadMasterDoc& MasterDocument)
 	{
 		const FString InputWorkspace = BuildInput.WorkspaceFolder.TrimStartAndEnd();
 		if (!InputWorkspace.IsEmpty())
@@ -24,8 +24,8 @@ namespace
 	}
 
 	FString ResolveChildJsonFolder(
-		const FCadMasterWorkflowBuildInput& BuildInput,
-		const FCadMasterJsonDocument& MasterDocument,
+		const FCadWorkflowBuildInput& BuildInput,
+		const FCadMasterDoc& MasterDocument,
 		const FString& WorkspaceFolder)
 	{
 		const FString ExplicitChildFolder = BuildInput.ChildJsonFolderPath.TrimStartAndEnd();
@@ -40,11 +40,11 @@ namespace
 
 namespace CadWorkflowBuildInputResolver
 {
-	FCadMasterWorkflowBuildInput Resolve(
-		const FCadMasterWorkflowBuildInput& BuildInput,
-		const FCadMasterJsonDocument& MasterDocument)
+	FCadWorkflowBuildInput Resolve(
+		const FCadWorkflowBuildInput& BuildInput,
+		const FCadMasterDoc& MasterDocument)
 	{
-		FCadMasterWorkflowBuildInput ResolvedBuildInput = BuildInput;
+		FCadWorkflowBuildInput ResolvedBuildInput = BuildInput;
 		ResolvedBuildInput.MasterJsonPath = FPaths::ConvertRelativePathToFull(BuildInput.MasterJsonPath.TrimStartAndEnd());
 		ResolvedBuildInput.WorkspaceFolder = ResolveWorkspaceFolder(ResolvedBuildInput, MasterDocument);
 		ResolvedBuildInput.ChildJsonFolderPath = ResolveChildJsonFolder(ResolvedBuildInput, MasterDocument, ResolvedBuildInput.WorkspaceFolder);

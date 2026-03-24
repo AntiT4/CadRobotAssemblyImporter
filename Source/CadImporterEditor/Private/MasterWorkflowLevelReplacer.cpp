@@ -108,7 +108,7 @@ namespace
 namespace CadLevelReplacer
 {
 	bool TryReplaceMasterHierarchyWithBlueprints(
-		const FCadMasterJsonDocument& MasterDocument,
+		const FCadMasterDoc& MasterDocument,
 		UBlueprint* MasterBlueprint,
 		const TMap<FString, UBlueprint*>& ChildBlueprintsByChildName,
 		FCadLevelReplaceResult& OutResult,
@@ -169,7 +169,7 @@ namespace CadLevelReplacer
 		SpawnedMasterActor->SetActorLabel(SpawnLabelBase, true);
 
 		int32 SpawnedChildActorCount = 0;
-		for (const FCadMasterChildEntry& ChildEntry : MasterDocument.Children)
+		for (const FCadChildEntry& ChildEntry : MasterDocument.Children)
 		{
 			const FString ChildName = ChildEntry.ActorName.TrimStartAndEnd();
 			if (ChildName.IsEmpty())

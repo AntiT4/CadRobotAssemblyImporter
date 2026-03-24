@@ -23,11 +23,11 @@ public:
 	FCadRobotRootPlacementHint ImportRootPlacementHint;
 
 	UFUNCTION(BlueprintCallable, Category = "CAD Robot|IO")
-	bool ApplyCommandInput(const FCadRobotCommand& InCommand);
+	bool ApplyCommand(const FCadRobotCommand& InCommand);
 
 	UFUNCTION(BlueprintCallable, Category = "CAD Robot|IO")
-	bool RunCommandController(float DeltaSeconds);
+	bool RunController(float DeltaSeconds);
 
 	UFUNCTION(BlueprintCallable, Category = "CAD Robot|IO")
-	bool UpdateStatusSensor(float DeltaSeconds);
+	bool UpdateStatus(float DeltaSeconds);
 };

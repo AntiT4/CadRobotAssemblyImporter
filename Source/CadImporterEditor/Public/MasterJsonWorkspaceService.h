@@ -14,9 +14,9 @@ struct FCadWorkspacePaths
 	FString ContentRootPath;
 	FString ContentDir;
 
-	FCadMasterWorkflowBuildInput ToBuildInput() const
+	FCadWorkflowBuildInput ToBuildInput() const
 	{
-		FCadMasterWorkflowBuildInput BuildInput;
+		FCadWorkflowBuildInput BuildInput;
 		BuildInput.WorkspaceFolder = WorkspaceFolder;
 		BuildInput.MasterJsonPath = MasterJsonPath;
 		BuildInput.ChildJsonFolderPath = ChildJsonFolderPath;

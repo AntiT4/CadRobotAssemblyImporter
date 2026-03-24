@@ -2,7 +2,7 @@
 
 #include "Misc/Paths.h"
 
-FCadImportPaths FCadImportPathResolver::BuildPaths(const FCadImportModel& Model) const
+FCadImportPaths FCadPathBuilder::Build(const FCadImportModel& Model) const
 {
 	FCadImportPaths Paths;
 	FString RootFolderPath = Model.OutputRootPath.TrimStartAndEnd();
@@ -22,7 +22,7 @@ FCadImportPaths FCadImportPathResolver::BuildPaths(const FCadImportModel& Model)
 	return Paths;
 }
 
-FString FCadImportPathResolver::MakeLinkFolderPath(
+FString FCadPathBuilder::MakeLinkFolderPath(
 	const FString& RootFolderPath,
 	const FString& RobotName,
 	const FString& LinkName,
@@ -36,7 +36,7 @@ FString FCadImportPathResolver::MakeLinkFolderPath(
 	return FString::Printf(TEXT("%s/%s"), *RootFolderPath, *LinkName);
 }
 
-FString FCadImportPathResolver::MakeBlueprintPath(const FString& RootFolderPath, const FString& RobotName) const
+FString FCadPathBuilder::MakeBlueprintPath(const FString& RootFolderPath, const FString& RobotName) const
 {
 	return FString::Printf(TEXT("%s/BP_%s"), *RootFolderPath, *RobotName);
 }

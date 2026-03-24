@@ -7,7 +7,7 @@
 class UFbxImportUI;
 class UStaticMesh;
 
-class FCadImportAssetImporter
+class FCadMeshImporter
 {
 public:
 	bool ImportMeshes(const FCadImportModel& Model, const FCadImportPaths& Paths, const FCadFbxImportOptions& Options, FCadImportResult& OutResult, FString& OutError);

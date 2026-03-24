@@ -16,7 +16,7 @@ struct FCadLevelReplaceResult
 namespace CadLevelReplacer
 {
 	bool TryReplaceMasterHierarchyWithBlueprints(
-		const FCadMasterJsonDocument& MasterDocument,
+		const FCadMasterDoc& MasterDocument,
 		UBlueprint* MasterBlueprint,
 		const TMap<FString, UBlueprint*>& ChildBlueprintsByChildName,
 		FCadLevelReplaceResult& OutResult,

@@ -24,7 +24,7 @@ struct FCadHierarchyIssueInfo
 struct FCadMasterSelection
 {
 	TWeakObjectPtr<AActor> MasterActor;
-	TArray<FCadMasterChildEntry> Children;
+	TArray<FCadChildEntry> Children;
 	TArray<FCadHierarchyIssueInfo> Issues;
 
 	bool IsValid() const

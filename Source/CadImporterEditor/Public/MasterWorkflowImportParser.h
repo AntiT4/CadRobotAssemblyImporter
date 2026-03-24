@@ -7,6 +7,6 @@ namespace CadMasterWorkflowImportParser
 {
 	bool TryLoadChildDocumentFromJsonPath(
 		const FString& ChildJsonPath,
-		FCadChildJsonDocument& OutDocument,
+		FCadChildDoc& OutDocument,
 		FString& OutError);
 }

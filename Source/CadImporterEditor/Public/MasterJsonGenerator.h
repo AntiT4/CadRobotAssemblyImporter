@@ -8,9 +8,9 @@ struct FCadMasterSelection;
 
 struct FCadMasterJsonGenerationResult
 {
-	FCadMasterJsonDocument Document;
+	FCadMasterDoc Document;
 	FCadWorkspacePaths WorkspacePaths;
-	FCadMasterWorkflowBuildInput BuildInput;
+	FCadWorkflowBuildInput BuildInput;
 };
 
 namespace CadMasterJsonGenerator
@@ -33,7 +33,7 @@ namespace CadMasterJsonGenerator
 		FString& OutError);
 
 	bool TryWriteDocument(
-		const FCadMasterJsonDocument& Document,
+		const FCadMasterDoc& Document,
 		const FString& OutputPath,
 		FString& OutError);
 }

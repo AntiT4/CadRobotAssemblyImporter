@@ -6,8 +6,8 @@
 namespace CadChildImportModelBuilder
 {
 	bool TryBuildImportModel(
-		const FCadMasterChildEntry& ChildEntry,
-		const FCadChildJsonDocument& ChildDocument,
+		const FCadChildEntry& ChildEntry,
+		const FCadChildDoc& ChildDocument,
 		const FString& ChildJsonFolderPath,
 		const FString& OutputRootPath,
 		FCadImportModel& OutModel,

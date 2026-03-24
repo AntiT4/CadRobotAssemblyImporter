@@ -10,7 +10,7 @@
 
 namespace
 {
-	FString BuildMasterBlueprintPackagePath(const FCadMasterJsonDocument& MasterDocument, const FCadMasterWorkflowBuildInput& BuildInput)
+	FString BuildMasterBlueprintPackagePath(const FCadMasterDoc& MasterDocument, const FCadWorkflowBuildInput& BuildInput)
 	{
 		const FString SafeMasterName = FPaths::MakeValidFileName(MasterDocument.MasterName).IsEmpty()
 			? TEXT("CadMaster")
@@ -33,8 +33,8 @@ namespace
 namespace CadMasterBlueprintBuilder
 {
 	bool TryBuildBlueprint(
-		const FCadMasterJsonDocument& MasterDocument,
-		const FCadMasterWorkflowBuildInput& BuildInput,
+		const FCadMasterDoc& MasterDocument,
+		const FCadWorkflowBuildInput& BuildInput,
 		UBlueprint*& OutBlueprint,
 		FString& OutError)
 	{
@@ -103,7 +103,7 @@ namespace CadMasterBlueprintBuilder
 		MasterDefaultObject->Metadata.SchemaVersion = TEXT("master_json_v1");
 		MasterDefaultObject->ChildPlacements.Reset();
 
-		for (const FCadMasterChildEntry& ChildEntry : MasterDocument.Children)
+		for (const FCadChildEntry& ChildEntry : MasterDocument.Children)
 		{
 			FCadMasterChildPlacement Placement;
 			Placement.ChildName = ChildEntry.ActorName;

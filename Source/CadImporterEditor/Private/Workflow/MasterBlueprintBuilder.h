@@ -7,8 +7,8 @@ class UBlueprint;
 namespace CadMasterBlueprintBuilder
 {
 	bool TryBuildBlueprint(
-		const FCadMasterJsonDocument& MasterDocument,
-		const FCadMasterWorkflowBuildInput& BuildInput,
+		const FCadMasterDoc& MasterDocument,
+		const FCadWorkflowBuildInput& BuildInput,
 		UBlueprint*& OutBlueprint,
 		FString& OutError);
 }

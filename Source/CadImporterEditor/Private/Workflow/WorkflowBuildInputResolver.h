@@ -4,7 +4,7 @@
 
 namespace CadWorkflowBuildInputResolver
 {
-	FCadMasterWorkflowBuildInput Resolve(
-		const FCadMasterWorkflowBuildInput& BuildInput,
-		const FCadMasterJsonDocument& MasterDocument);
+	FCadWorkflowBuildInput Resolve(
+		const FCadWorkflowBuildInput& BuildInput,
+		const FCadMasterDoc& MasterDocument);
 }

@@ -7,8 +7,8 @@ struct FCadChildJsonResult
 {
 	FString MasterJsonPath;
 	FString ChildJsonFolderPath;
-	FCadMasterJsonDocument MasterDocument;
-	FCadMasterWorkflowBuildInput BuildInput;
+	FCadMasterDoc MasterDocument;
+	FCadWorkflowBuildInput BuildInput;
 	TArray<FString> GeneratedChildJsonPaths;
 };
 
@@ -16,12 +16,12 @@ namespace CadChildJsonService
 {
 	bool TryParseMasterDocument(
 		const FString& MasterJsonPath,
-		FCadMasterJsonDocument& OutDocument,
+		FCadMasterDoc& OutDocument,
 		FString& OutError);
 
 	bool TryExtractChildJsonFilesFromDocument(
 		const FString& MasterJsonPath,
-		const FCadMasterJsonDocument& MasterDocument,
+		const FCadMasterDoc& MasterDocument,
 		FCadChildJsonResult& OutResult,
 		FString& OutError);
 
