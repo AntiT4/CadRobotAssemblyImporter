@@ -21,19 +21,14 @@ void FCadImporterEditorModule::ShutdownModule()
 {
 	UToolMenus::UnRegisterStartupCallback(this);
 	UToolMenus::UnregisterOwner(this);
-	WizardRunner.Reset();
-}
-
-void FCadImporterEditorModule::PluginButtonClicked()
-{
-	OpenMasterWorkflowWizardPopup();
+	ImportService.Reset();
 }
 
 void FCadImporterEditorModule::RegisterMenus()
 {
 	// Owner will be used for cleanup in call to UToolMenus::UnregisterOwner
 	FToolMenuOwnerScoped OwnerScoped(this);
-	const FUIAction Action = FUIAction(FExecuteAction::CreateRaw(this, &FCadImporterEditorModule::PluginButtonClicked));
+	const FUIAction Action = FUIAction(FExecuteAction::CreateRaw(this, &FCadImporterEditorModule::OpenWorkflowWindow));
 
 	{
 		UToolMenu* Menu = UToolMenus::Get()->ExtendMenu("LevelEditor.MainMenu.Window");
@@ -65,7 +60,7 @@ void FCadImporterEditorModule::RegisterMenus()
 	}
 }
 
-void FCadImporterEditorModule::OpenMasterWorkflowWizardPopup()
+void FCadImporterEditorModule::OpenWorkflowWindow()
 {
 	if (!FSlateApplication::IsInitialized())
 	{
@@ -73,9 +68,9 @@ void FCadImporterEditorModule::OpenMasterWorkflowWizardPopup()
 		return;
 	}
 
-	if (!WizardRunner.IsValid())
+	if (!ImportService.IsValid())
 	{
-		WizardRunner = MakeShared<FCadImporterRunner>();
+		ImportService = MakeShared<FCadImportService>();
 	}
 
 	TSharedRef<SWindow> WizardWindow = SNew(SWindow)
@@ -84,8 +79,8 @@ void FCadImporterEditorModule::OpenMasterWorkflowWizardPopup()
 		.SupportsMinimize(false)
 		.SupportsMaximize(false)
 		[
-			SNew(SCadMasterWorkflowWizard)
-			.Runner(WizardRunner)
+			SNew(SCadWorkflowWizard)
+			.Runner(ImportService)
 		];
 
 	FSlateApplication::Get().AddWindow(WizardWindow);

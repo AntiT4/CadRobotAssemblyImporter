@@ -105,16 +105,16 @@ namespace
 	}
 }
 
-namespace CadMasterWorkflowLevelReplacer
+namespace CadLevelReplacer
 {
 	bool TryReplaceMasterHierarchyWithBlueprints(
 		const FCadMasterJsonDocument& MasterDocument,
 		UBlueprint* MasterBlueprint,
 		const TMap<FString, UBlueprint*>& ChildBlueprintsByChildName,
-		FCadMasterWorkflowReplaceResult& OutResult,
+		FCadLevelReplaceResult& OutResult,
 		FString& OutError)
 	{
-		OutResult = FCadMasterWorkflowReplaceResult();
+		OutResult = FCadLevelReplaceResult();
 		OutError.Reset();
 
 		if (!GEditor)

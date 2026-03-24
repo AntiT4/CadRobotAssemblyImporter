@@ -5,14 +5,14 @@
 
 class ACadMasterActor;
 
-struct FCadMasterWorkflowWorkspacePaths
+struct FCadWorkspacePaths
 {
 	FString WorkspaceFolder;
 	FString MasterName;
 	FString MasterJsonPath;
 	FString ChildJsonFolderPath;
 	FString ContentRootPath;
-	FString ContentDiskFolderPath;
+	FString ContentDir;
 
 	FCadMasterWorkflowBuildInput ToBuildInput() const
 	{
@@ -25,16 +25,16 @@ struct FCadMasterWorkflowWorkspacePaths
 	}
 };
 
-namespace CadMasterJsonWorkspaceService
+namespace CadWorkspaceService
 {
 	bool TryPrepareWorkspace(
 		const FString& WorkspaceFolderInput,
 		const FString& MasterNameInput,
-		FCadMasterWorkflowWorkspacePaths& OutPaths,
+		FCadWorkspacePaths& OutPaths,
 		FString& OutError);
 
 	bool TryPrepareWorkspaceForMasterActor(
 		const ACadMasterActor* MasterActor,
-		FCadMasterWorkflowWorkspacePaths& OutPaths,
+		FCadWorkspacePaths& OutPaths,
 		FString& OutError);
 }

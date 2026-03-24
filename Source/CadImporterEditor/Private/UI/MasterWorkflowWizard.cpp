@@ -176,20 +176,20 @@ namespace
 	}
 }
 
-void SCadMasterWorkflowWizard::Construct(const FArguments& InArgs)
+void SCadWorkflowWizard::Construct(const FArguments& InArgs)
 {
 	Runner = InArgs._Runner;
 	WorkspaceFolder = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir());
 	StatusMessage = TEXT("Step 1: Set workspace folder.");
 	SelectionPreviewText = TEXT("선택된 액터 없음");
-	ActiveStepIndex = 0;
-	ChildTypeOptions.Reset();
-	ChildTypeOptions.Add(MakeShared<FString>(TEXT("static")));
-	ChildTypeOptions.Add(MakeShared<FString>(TEXT("movable")));
+	StepIndex = 0;
+	ChildTypeItems.Reset();
+	ChildTypeItems.Add(MakeShared<FString>(TEXT("static")));
+	ChildTypeItems.Add(MakeShared<FString>(TEXT("movable")));
 	ImportOptions = FCadFbxImportOptions();
 	ImportOptions.bShowDialog = false;
-	LastSelectionSignature.Reset();
-	RegisterActiveTimer(1.0f, FWidgetActiveTimerDelegate::CreateSP(this, &SCadMasterWorkflowWizard::HandleSelectionPolling));
+	SelectionKey.Reset();
+	RegisterActiveTimer(1.0f, FWidgetActiveTimerDelegate::CreateSP(this, &SCadWorkflowWizard::PollSelection));
 
 	ChildSlot
 	[
@@ -213,7 +213,7 @@ void SCadMasterWorkflowWizard::Construct(const FArguments& InArgs)
 						TEXT("4/4 Build Actor"),
 						TEXT("Completed")
 					};
-					const int32 SafeIndex = FMath::Clamp(ActiveStepIndex, 0, 4);
+					const int32 SafeIndex = FMath::Clamp(StepIndex, 0, 4);
 					return FText::FromString(FString::Printf(TEXT("Master Workflow Wizard - %s"), Labels[SafeIndex]));
 				})
 			]
@@ -224,7 +224,7 @@ void SCadMasterWorkflowWizard::Construct(const FArguments& InArgs)
 				SNew(SWidgetSwitcher)
 				.WidgetIndex_Lambda([this]()
 				{
-					return ActiveStepIndex;
+					return StepIndex;
 				})
 
 				+ SWidgetSwitcher::Slot()
@@ -265,7 +265,7 @@ void SCadMasterWorkflowWizard::Construct(const FArguments& InArgs)
 						[
 							SNew(SButton)
 							.Text(FText::FromString(TEXT("Browse Workspace")))
-							.OnClicked(this, &SCadMasterWorkflowWizard::HandleBrowseWorkspace)
+							.OnClicked(this, &SCadWorkflowWizard::HandleBrowseWorkspace)
 						]
 
 						+ SHorizontalBox::Slot()
@@ -273,7 +273,7 @@ void SCadMasterWorkflowWizard::Construct(const FArguments& InArgs)
 						[
 							SNew(SButton)
 							.Text(FText::FromString(TEXT("Apply Workspace")))
-							.OnClicked(this, &SCadMasterWorkflowWizard::HandleApplyWorkspace)
+							.OnClicked(this, &SCadWorkflowWizard::HandleApplyWorkspace)
 						]
 					]
 				]
@@ -336,7 +336,7 @@ void SCadMasterWorkflowWizard::Construct(const FArguments& InArgs)
 						[
 							SNew(SButton)
 							.Text(FText::FromString(TEXT("Back")))
-							.OnClicked(this, &SCadMasterWorkflowWizard::HandleBack)
+							.OnClicked(this, &SCadWorkflowWizard::HandleBack)
 						]
 
 						+ SHorizontalBox::Slot()
@@ -344,7 +344,7 @@ void SCadMasterWorkflowWizard::Construct(const FArguments& InArgs)
 						[
 							SNew(SButton)
 							.Text(FText::FromString(TEXT("Master Actor Confirm")))
-							.OnClicked(this, &SCadMasterWorkflowWizard::HandleConfirmMasterActor)
+							.OnClicked(this, &SCadWorkflowWizard::ConfirmMaster)
 						]
 					]
 				]
@@ -368,7 +368,7 @@ void SCadMasterWorkflowWizard::Construct(const FArguments& InArgs)
 						SNew(STextBlock)
 						.Text_Lambda([this]()
 						{
-							const AActor* MasterActor = ConfirmedSelectionResult.MasterCandidateActor.Get();
+							const AActor* MasterActor = ConfirmedSelection.MasterActor.Get();
 							const FString MasterName = MasterActor ? MasterActor->GetActorNameOrLabel() : TEXT("(not confirmed)");
 							return FText::FromString(FString::Printf(TEXT("Confirmed Master: %s"), *MasterName));
 						})
@@ -396,7 +396,7 @@ void SCadMasterWorkflowWizard::Construct(const FArguments& InArgs)
 						[
 							SNew(SButton)
 							.Text(FText::FromString(TEXT("Back")))
-							.OnClicked(this, &SCadMasterWorkflowWizard::HandleBack)
+							.OnClicked(this, &SCadWorkflowWizard::HandleBack)
 						]
 
 						+ SHorizontalBox::Slot()
@@ -404,7 +404,7 @@ void SCadMasterWorkflowWizard::Construct(const FArguments& InArgs)
 						[
 							SNew(SButton)
 							.Text(FText::FromString(TEXT("Generate JSON")))
-							.OnClicked(this, &SCadMasterWorkflowWizard::HandleGenerateJson)
+							.OnClicked(this, &SCadWorkflowWizard::GenerateWorkflowJson)
 						]
 					]
 				]
@@ -428,7 +428,7 @@ void SCadMasterWorkflowWizard::Construct(const FArguments& InArgs)
 						SNew(STextBlock)
 						.Text_Lambda([this]()
 						{
-							return FText::FromString(FString::Printf(TEXT("Child Folder: %s"), *WorkflowBuildInput.ChildJsonFolderPath));
+							return FText::FromString(FString::Printf(TEXT("Child Folder: %s"), *BuildInput.ChildJsonFolderPath));
 						})
 					]
 
@@ -443,7 +443,7 @@ void SCadMasterWorkflowWizard::Construct(const FArguments& InArgs)
 						[
 							SNew(SButton)
 							.Text(FText::FromString(TEXT("Back")))
-							.OnClicked(this, &SCadMasterWorkflowWizard::HandleBack)
+							.OnClicked(this, &SCadWorkflowWizard::HandleBack)
 						]
 
 						+ SHorizontalBox::Slot()
@@ -451,7 +451,7 @@ void SCadMasterWorkflowWizard::Construct(const FArguments& InArgs)
 						[
 							SNew(SButton)
 							.Text(FText::FromString(TEXT("Build Actor")))
-							.OnClicked(this, &SCadMasterWorkflowWizard::HandleBuildActor)
+							.OnClicked(this, &SCadWorkflowWizard::BuildAssembly)
 						]
 					]
 				]
@@ -473,7 +473,7 @@ void SCadMasterWorkflowWizard::Construct(const FArguments& InArgs)
 					[
 						SNew(SButton)
 						.Text(FText::FromString(TEXT("Restart Workflow")))
-						.OnClicked(this, &SCadMasterWorkflowWizard::HandleRestart)
+						.OnClicked(this, &SCadWorkflowWizard::RestartWorkflow)
 					]
 				]
 			]
@@ -496,18 +496,18 @@ void SCadMasterWorkflowWizard::Construct(const FArguments& InArgs)
 		]
 	];
 
-	RebuildChildTypeRows();
+	RebuildChildRows();
 }
 
-EActiveTimerReturnType SCadMasterWorkflowWizard::HandleSelectionPolling(double CurrentTime, float DeltaTime)
+EActiveTimerReturnType SCadWorkflowWizard::PollSelection(double CurrentTime, float DeltaTime)
 {
 	static_cast<void>(CurrentTime);
 	static_cast<void>(DeltaTime);
-	RefreshSelectionPreviewIfChanged();
+	RefreshSelectionPreview();
 	return EActiveTimerReturnType::Continue;
 }
 
-void SCadMasterWorkflowWizard::RefreshSelectionPreviewIfChanged()
+void SCadWorkflowWizard::RefreshSelectionPreview()
 {
 	FString CurrentSignature;
 	AActor* SingleSelectedActor = nullptr;
@@ -558,13 +558,13 @@ void SCadMasterWorkflowWizard::RefreshSelectionPreviewIfChanged()
 		}
 	}
 
-	if (CurrentSignature == LastSelectionSignature)
+	if (CurrentSignature == SelectionKey)
 	{
 		// Skip descendant lookup when selected actor has not changed.
 		return;
 	}
 
-	LastSelectionSignature = CurrentSignature;
+	SelectionKey = CurrentSignature;
 
 	if (!GEditor)
 	{
@@ -611,7 +611,7 @@ void SCadMasterWorkflowWizard::RefreshSelectionPreviewIfChanged()
 	SelectionPreviewText = MoveTemp(Result);
 }
 
-void SCadMasterWorkflowWizard::RebuildChildTypeRows()
+void SCadWorkflowWizard::RebuildChildRows()
 {
 	if (!ChildTypeRowsBox.IsValid())
 	{
@@ -620,7 +620,7 @@ void SCadMasterWorkflowWizard::RebuildChildTypeRows()
 
 	ChildTypeRowsBox->ClearChildren();
 
-	if (EditableChildren.Num() == 0)
+	if (ChildEntries.Num() == 0)
 	{
 		ChildTypeRowsBox->AddSlot()
 		.AutoHeight()
@@ -632,7 +632,7 @@ void SCadMasterWorkflowWizard::RebuildChildTypeRows()
 		return;
 	}
 
-	for (int32 ChildIndex = 0; ChildIndex < EditableChildren.Num(); ++ChildIndex)
+	for (int32 ChildIndex = 0; ChildIndex < ChildEntries.Num(); ++ChildIndex)
 	{
 		ChildTypeRowsBox->AddSlot()
 		.AutoHeight()
@@ -645,7 +645,7 @@ void SCadMasterWorkflowWizard::RebuildChildTypeRows()
 			.VAlign(VAlign_Center)
 			[
 				SNew(STextBlock)
-				.Text(FText::FromString(EditableChildren[ChildIndex].ActorName))
+				.Text(FText::FromString(ChildEntries[ChildIndex].ActorName))
 			]
 
 			+ SHorizontalBox::Slot()
@@ -655,7 +655,7 @@ void SCadMasterWorkflowWizard::RebuildChildTypeRows()
 			.VAlign(VAlign_Center)
 			[
 				SNew(SComboBox<TSharedPtr<FString>>)
-				.OptionsSource(&ChildTypeOptions)
+				.OptionsSource(&ChildTypeItems)
 				.OnGenerateWidget_Lambda([](const TSharedPtr<FString> Item)
 				{
 					return SNew(STextBlock).Text(FText::FromString(Item.IsValid() ? *Item : TEXT("")));
@@ -666,17 +666,17 @@ void SCadMasterWorkflowWizard::RebuildChildTypeRows()
 					{
 						return;
 					}
-					HandleChildTypeSelectionChanged(ChildIndex, *SelectedType);
+					SetChildType(ChildIndex, *SelectedType);
 				})
 				[
 					SNew(STextBlock)
 					.Text_Lambda([this, ChildIndex]()
 					{
-						if (!EditableChildren.IsValidIndex(ChildIndex))
+						if (!ChildEntries.IsValidIndex(ChildIndex))
 						{
 							return FText::FromString(TEXT("static"));
 						}
-						return FText::FromString(MasterChildActorTypeToUiString(EditableChildren[ChildIndex].ActorType));
+						return FText::FromString(MasterChildActorTypeToUiString(ChildEntries[ChildIndex].ActorType));
 					})
 				]
 			]
@@ -688,20 +688,20 @@ void SCadMasterWorkflowWizard::RebuildChildTypeRows()
 				SNew(SButton)
 				.Text_Lambda([this, ChildIndex]()
 				{
-					return FText::FromString(IsChildVisibilityIsolated(ChildIndex) ? TEXT("Restore") : TEXT("Show"));
+					return FText::FromString(IsChildIsolated(ChildIndex) ? TEXT("Restore") : TEXT("Show"));
 				})
 				.OnClicked_Lambda([this, ChildIndex]()
 				{
-					return HandleToggleChildVisibility(ChildIndex);
+					return ToggleChildVisibility(ChildIndex);
 				})
 			]
 		];
 	}
 }
 
-void SCadMasterWorkflowWizard::HandleChildTypeSelectionChanged(const int32 ChildIndex, const FString& SelectedType)
+void SCadWorkflowWizard::SetChildType(const int32 ChildIndex, const FString& SelectedType)
 {
-	if (!EditableChildren.IsValidIndex(ChildIndex))
+	if (!ChildEntries.IsValidIndex(ChildIndex))
 	{
 		return;
 	}
@@ -712,10 +712,10 @@ void SCadMasterWorkflowWizard::HandleChildTypeSelectionChanged(const int32 Child
 		return;
 	}
 
-	EditableChildren[ChildIndex].ActorType = ParsedType;
+	ChildEntries[ChildIndex].ActorType = ParsedType;
 }
 
-AActor* SCadMasterWorkflowWizard::ResolveChildActorByPath(const FCadMasterChildEntry& ChildEntry) const
+AActor* SCadWorkflowWizard::FindChildActor(const FCadMasterChildEntry& ChildEntry) const
 {
 	if (ChildEntry.ActorPath.TrimStartAndEnd().IsEmpty())
 	{
@@ -725,14 +725,14 @@ AActor* SCadMasterWorkflowWizard::ResolveChildActorByPath(const FCadMasterChildE
 	return FindObject<AActor>(nullptr, *ChildEntry.ActorPath);
 }
 
-void SCadMasterWorkflowWizard::CaptureChildVisibilitySnapshot()
+void SCadWorkflowWizard::SaveChildVisibility()
 {
-	ChildVisibilitySnapshot.Reset();
+	SavedVisibility.Reset();
 	TArray<AActor*> HierarchyActors;
 
-	for (const FCadMasterChildEntry& ChildEntry : EditableChildren)
+	for (const FCadMasterChildEntry& ChildEntry : ChildEntries)
 	{
-		AActor* ChildActor = ResolveChildActorByPath(ChildEntry);
+		AActor* ChildActor = FindChildActor(ChildEntry);
 		if (!ChildActor)
 		{
 			continue;
@@ -747,23 +747,23 @@ void SCadMasterWorkflowWizard::CaptureChildVisibilitySnapshot()
 			}
 
 			const FString ActorPath = HierarchyActor->GetPathName();
-			if (ChildVisibilitySnapshot.Contains(ActorPath))
+			if (SavedVisibility.Contains(ActorPath))
 			{
 				continue;
 			}
 
-			ChildVisibilitySnapshot.Add(ActorPath, HierarchyActor->IsTemporarilyHiddenInEditor());
+			SavedVisibility.Add(ActorPath, HierarchyActor->IsTemporarilyHiddenInEditor());
 		}
 	}
 }
 
-void SCadMasterWorkflowWizard::ApplyChildVisibilityIsolation(const int32 ChildIndex)
+void SCadWorkflowWizard::IsolateChildVisibility(const int32 ChildIndex)
 {
 	TArray<AActor*> HierarchyActors;
 
-	for (int32 Index = 0; Index < EditableChildren.Num(); ++Index)
+	for (int32 Index = 0; Index < ChildEntries.Num(); ++Index)
 	{
-		AActor* ChildActor = ResolveChildActorByPath(EditableChildren[Index]);
+		AActor* ChildActor = FindChildActor(ChildEntries[Index]);
 		if (!ChildActor)
 		{
 			continue;
@@ -786,9 +786,9 @@ void SCadMasterWorkflowWizard::ApplyChildVisibilityIsolation(const int32 ChildIn
 	}
 }
 
-void SCadMasterWorkflowWizard::RestoreChildVisibility()
+void SCadWorkflowWizard::RestoreChildVisibilityState()
 {
-	for (const TPair<FString, bool>& SnapshotEntry : ChildVisibilitySnapshot)
+	for (const TPair<FString, bool>& SnapshotEntry : SavedVisibility)
 	{
 		AActor* Actor = FindObject<AActor>(nullptr, *SnapshotEntry.Key);
 		if (!Actor)
@@ -799,8 +799,8 @@ void SCadMasterWorkflowWizard::RestoreChildVisibility()
 		Actor->SetIsTemporarilyHiddenInEditor(SnapshotEntry.Value);
 	}
 
-	ChildVisibilitySnapshot.Reset();
-	IsolatedChildIndex = INDEX_NONE;
+	SavedVisibility.Reset();
+	IsolatedIndex = INDEX_NONE;
 
 	if (GEditor)
 	{
@@ -808,45 +808,45 @@ void SCadMasterWorkflowWizard::RestoreChildVisibility()
 	}
 }
 
-bool SCadMasterWorkflowWizard::IsChildVisibilityIsolated(const int32 ChildIndex) const
+bool SCadWorkflowWizard::IsChildIsolated(const int32 ChildIndex) const
 {
-	return ChildVisibilitySnapshot.Num() > 0 && IsolatedChildIndex == ChildIndex;
+	return SavedVisibility.Num() > 0 && IsolatedIndex == ChildIndex;
 }
 
-FReply SCadMasterWorkflowWizard::HandleToggleChildVisibility(const int32 ChildIndex)
+FReply SCadWorkflowWizard::ToggleChildVisibility(const int32 ChildIndex)
 {
-	if (!EditableChildren.IsValidIndex(ChildIndex))
+	if (!ChildEntries.IsValidIndex(ChildIndex))
 	{
 		return FReply::Handled();
 	}
 
-	if (IsChildVisibilityIsolated(ChildIndex))
+	if (IsChildIsolated(ChildIndex))
 	{
-		RestoreChildVisibility();
-		const AActor* MasterActor = ConfirmedSelectionResult.MasterCandidateActor.Get();
-		SetStatusMessage(FString::Printf(
+		RestoreChildVisibilityState();
+		const AActor* MasterActor = ConfirmedSelection.MasterActor.Get();
+		SetStatus(FString::Printf(
 			TEXT("Visibility restored for child actors under master '%s'."),
 			MasterActor ? *MasterActor->GetActorNameOrLabel() : TEXT("(none)")));
 		return FReply::Handled();
 	}
 
-	if (ChildVisibilitySnapshot.Num() == 0)
+	if (SavedVisibility.Num() == 0)
 	{
-		CaptureChildVisibilitySnapshot();
+		SaveChildVisibility();
 	}
 
-	ApplyChildVisibilityIsolation(ChildIndex);
-	IsolatedChildIndex = ChildIndex;
-	SetStatusMessage(FString::Printf(TEXT("Isolated child visibility: %s"), *EditableChildren[ChildIndex].ActorName));
+	IsolateChildVisibility(ChildIndex);
+	IsolatedIndex = ChildIndex;
+	SetStatus(FString::Printf(TEXT("Isolated child visibility: %s"), *ChildEntries[ChildIndex].ActorName));
 	return FReply::Handled();
 }
 
-FReply SCadMasterWorkflowWizard::HandleBrowseWorkspace()
+FReply SCadWorkflowWizard::HandleBrowseWorkspace()
 {
 	IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
 	if (!DesktopPlatform)
 	{
-		SetStatusMessage(TEXT("Workspace browse failed: Desktop platform module is unavailable."));
+		SetStatus(TEXT("Workspace browse failed: Desktop platform module is unavailable."));
 		return FReply::Handled();
 	}
 
@@ -870,19 +870,19 @@ FReply SCadMasterWorkflowWizard::HandleBrowseWorkspace()
 		{
 			WorkspaceTextBox->SetText(FText::FromString(WorkspaceFolder));
 		}
-		SetStatusMessage(FString::Printf(TEXT("Workspace selected: %s"), *WorkspaceFolder));
+		SetStatus(FString::Printf(TEXT("Workspace selected: %s"), *WorkspaceFolder));
 	}
 
 	return FReply::Handled();
 }
 
-FReply SCadMasterWorkflowWizard::HandleApplyWorkspace()
+FReply SCadWorkflowWizard::HandleApplyWorkspace()
 {
 	FString NormalizedWorkspace;
 	FString WorkspaceValidationError;
 	if (!TryValidateWorkspaceForApply(WorkspaceFolder, NormalizedWorkspace, WorkspaceValidationError))
 	{
-		SetStatusMessage(FString::Printf(TEXT("Workspace apply failed:\n%s"), *WorkspaceValidationError));
+		SetStatus(FString::Printf(TEXT("Workspace apply failed:\n%s"), *WorkspaceValidationError));
 		return FReply::Handled();
 	}
 
@@ -892,35 +892,35 @@ FReply SCadMasterWorkflowWizard::HandleApplyWorkspace()
 		WorkspaceTextBox->SetText(FText::FromString(WorkspaceFolder));
 	}
 
-	MoveToStep(1);
-	SetStatusMessage(FString::Printf(TEXT("Workspace applied: %s"), *WorkspaceFolder));
+	SetStep(1);
+	SetStatus(FString::Printf(TEXT("Workspace applied: %s"), *WorkspaceFolder));
 	return FReply::Handled();
 }
 
-FReply SCadMasterWorkflowWizard::HandleBack()
+FReply SCadWorkflowWizard::HandleBack()
 {
-	const int32 NextStep = FMath::Max(0, ActiveStepIndex - 1);
-	if (ChildVisibilitySnapshot.Num() > 0 && NextStep < 2)
+	const int32 NextStep = FMath::Max(0, StepIndex - 1);
+	if (SavedVisibility.Num() > 0 && NextStep < 2)
 	{
-		RestoreChildVisibility();
+		RestoreChildVisibilityState();
 	}
 
-	MoveToStep(NextStep);
+	SetStep(NextStep);
 	return FReply::Handled();
 }
 
-FReply SCadMasterWorkflowWizard::HandleConfirmMasterActor()
+FReply SCadWorkflowWizard::ConfirmMaster()
 {
-	if (ChildVisibilitySnapshot.Num() > 0)
+	if (SavedVisibility.Num() > 0)
 	{
-		RestoreChildVisibility();
+		RestoreChildVisibilityState();
 	}
 
 	FString NormalizedWorkspace;
 	FString WorkspaceValidationError;
 	if (!TryValidateWorkspaceForGeneration(WorkspaceFolder, NormalizedWorkspace, WorkspaceValidationError))
 	{
-		SetStatusMessage(FString::Printf(TEXT("Master actor confirmation failed:\n%s"), *WorkspaceValidationError));
+		SetStatus(FString::Printf(TEXT("Master actor confirmation failed:\n%s"), *WorkspaceValidationError));
 		return FReply::Handled();
 	}
 
@@ -931,42 +931,42 @@ FReply SCadMasterWorkflowWizard::HandleConfirmMasterActor()
 	}
 
 	FString Error;
-	FCadMasterActorSelectionResult SelectionResult;
-	if (!CadMasterJsonActorCollector::TryCollectFromSelection(SelectionResult, Error))
+	FCadMasterSelection SelectionResult;
+	if (!CadMasterSelection::TryCollectFromSelection(SelectionResult, Error))
 	{
-		SetStatusMessage(FString::Printf(TEXT("Master actor confirmation failed:\n%s"), *Error));
+		SetStatus(FString::Printf(TEXT("Master actor confirmation failed:\n%s"), *Error));
 		return FReply::Handled();
 	}
 
-	ConfirmedSelectionResult = SelectionResult;
-	EditableChildren = SelectionResult.DirectChildren;
-	ChildVisibilitySnapshot.Reset();
-	IsolatedChildIndex = INDEX_NONE;
-	MasterGenerationResult = FCadMasterJsonGenerationResult();
-	ChildExtractionResult = FCadChildJsonExtractionResult();
-	WorkflowBuildInput = FCadMasterWorkflowBuildInput();
-	RebuildChildTypeRows();
+	ConfirmedSelection = SelectionResult;
+	ChildEntries = SelectionResult.Children;
+	SavedVisibility.Reset();
+	IsolatedIndex = INDEX_NONE;
+	MasterJsonResult = FCadMasterJsonGenerationResult();
+	ChildJsonResult = FCadChildJsonResult();
+	BuildInput = FCadMasterWorkflowBuildInput();
+	RebuildChildRows();
 
-	const AActor* ConfirmedMasterActor = ConfirmedSelectionResult.MasterCandidateActor.Get();
-	MoveToStep(2);
-	SetStatusMessage(FString::Printf(
+	const AActor* ConfirmedMasterActor = ConfirmedSelection.MasterActor.Get();
+	SetStep(2);
+	SetStatus(FString::Printf(
 		TEXT("Master actor confirmed.\nmaster=%s\nchildren=%d\n다음 단계에서 child actor_type을 선택 후 Generate JSON을 실행하세요."),
 		ConfirmedMasterActor ? *ConfirmedMasterActor->GetActorNameOrLabel() : TEXT("(none)"),
-		EditableChildren.Num()));
+		ChildEntries.Num()));
 	return FReply::Handled();
 }
 
-FReply SCadMasterWorkflowWizard::HandleGenerateJson()
+FReply SCadWorkflowWizard::GenerateWorkflowJson()
 {
-	if (!ConfirmedSelectionResult.IsValid())
+	if (!ConfirmedSelection.IsValid())
 	{
-		SetStatusMessage(TEXT("Generate JSON failed: confirm master actor first."));
+		SetStatus(TEXT("Generate JSON failed: confirm master actor first."));
 		return FReply::Handled();
 	}
 
-	if (EditableChildren.Num() == 0)
+	if (ChildEntries.Num() == 0)
 	{
-		SetStatusMessage(TEXT("Generate JSON failed: confirmed master has no direct children."));
+		SetStatus(TEXT("Generate JSON failed: confirmed master has no direct children."));
 		return FReply::Handled();
 	}
 
@@ -974,7 +974,7 @@ FReply SCadMasterWorkflowWizard::HandleGenerateJson()
 	FString WorkspaceValidationError;
 	if (!TryValidateWorkspaceForGeneration(WorkspaceFolder, NormalizedWorkspace, WorkspaceValidationError))
 	{
-		SetStatusMessage(FString::Printf(TEXT("Generate JSON failed:\n%s"), *WorkspaceValidationError));
+		SetStatus(FString::Printf(TEXT("Generate JSON failed:\n%s"), *WorkspaceValidationError));
 		return FReply::Handled();
 	}
 
@@ -984,106 +984,106 @@ FReply SCadMasterWorkflowWizard::HandleGenerateJson()
 		WorkspaceTextBox->SetText(FText::FromString(WorkspaceFolder));
 	}
 
-	FCadMasterActorSelectionResult SelectionForGeneration = ConfirmedSelectionResult;
-	SelectionForGeneration.DirectChildren = EditableChildren;
+	FCadMasterSelection SelectionForGeneration = ConfirmedSelection;
+	SelectionForGeneration.Children = ChildEntries;
 
 	FString Error;
-	if (!CadMasterJsonGenerator::TryGenerateAndWriteFromSelectionResult(SelectionForGeneration, WorkspaceFolder, MasterGenerationResult, Error))
+	if (!CadMasterJsonGenerator::TryGenerateAndWriteFromSelectionResult(SelectionForGeneration, WorkspaceFolder, MasterJsonResult, Error))
 	{
-		SetStatusMessage(FString::Printf(TEXT("Generate JSON failed:\n%s"), *Error));
+		SetStatus(FString::Printf(TEXT("Generate JSON failed:\n%s"), *Error));
 		return FReply::Handled();
 	}
 
-	const FString MasterJsonPath = MasterGenerationResult.WorkspacePaths.MasterJsonPath;
+	const FString MasterJsonPath = MasterJsonResult.WorkspacePaths.MasterJsonPath;
 	if (MasterJsonPath.IsEmpty())
 	{
-		SetStatusMessage(TEXT("Generate JSON failed: master json path is empty."));
+		SetStatus(TEXT("Generate JSON failed: master json path is empty."));
 		return FReply::Handled();
 	}
 
-	if (!CadMasterChildJsonExtractor::TryExtractChildJsonFilesFromDocument(
+	if (!CadChildJsonService::TryExtractChildJsonFilesFromDocument(
 		MasterJsonPath,
-		MasterGenerationResult.Document,
-		ChildExtractionResult,
+		MasterJsonResult.Document,
+		ChildJsonResult,
 		Error))
 	{
-		SetStatusMessage(FString::Printf(TEXT("Generate JSON failed while creating child json files:\n%s"), *Error));
+		SetStatus(FString::Printf(TEXT("Generate JSON failed while creating child json files:\n%s"), *Error));
 		return FReply::Handled();
 	}
 
-	WorkflowBuildInput = ChildExtractionResult.BuildInput;
-	if (WorkflowBuildInput.ContentRootPath.TrimStartAndEnd().IsEmpty())
+	BuildInput = ChildJsonResult.BuildInput;
+	if (BuildInput.ContentRootPath.TrimStartAndEnd().IsEmpty())
 	{
-		WorkflowBuildInput.ContentRootPath = MasterGenerationResult.WorkspacePaths.ContentRootPath;
+		BuildInput.ContentRootPath = MasterJsonResult.WorkspacePaths.ContentRootPath;
 	}
 
-	if (ChildVisibilitySnapshot.Num() > 0)
+	if (SavedVisibility.Num() > 0)
 	{
-		RestoreChildVisibility();
+		RestoreChildVisibilityState();
 	}
 
-	MoveToStep(3);
-	SetStatusMessage(FString::Printf(
+	SetStep(3);
+	SetStatus(FString::Printf(
 		TEXT("Master/Child JSON generated.\nmaster=%s\nchild_count=%d\nchild_folder=%s"),
-		*MasterGenerationResult.WorkspacePaths.MasterJsonPath,
-		ChildExtractionResult.GeneratedChildJsonPaths.Num(),
-		*ChildExtractionResult.ChildJsonFolderPath));
+		*MasterJsonResult.WorkspacePaths.MasterJsonPath,
+		ChildJsonResult.GeneratedChildJsonPaths.Num(),
+		*ChildJsonResult.ChildJsonFolderPath));
 	return FReply::Handled();
 }
 
-FReply SCadMasterWorkflowWizard::HandleBuildActor()
+FReply SCadWorkflowWizard::BuildAssembly()
 {
 	if (!Runner.IsValid())
 	{
-		SetStatusMessage(TEXT("Build failed: importer runner is unavailable."));
+		SetStatus(TEXT("Build failed: importer runner is unavailable."));
 		return FReply::Handled();
 	}
 
-	if (WorkflowBuildInput.MasterJsonPath.TrimStartAndEnd().IsEmpty() ||
-		WorkflowBuildInput.ChildJsonFolderPath.TrimStartAndEnd().IsEmpty())
+	if (BuildInput.MasterJsonPath.TrimStartAndEnd().IsEmpty() ||
+		BuildInput.ChildJsonFolderPath.TrimStartAndEnd().IsEmpty())
 	{
-		SetStatusMessage(TEXT("Build failed: workflow input is incomplete. Run previous steps first."));
+		SetStatus(TEXT("Build failed: workflow input is incomplete. Run previous steps first."));
 		return FReply::Handled();
 	}
 
-	if (!Runner->RunMasterWorkflowImport(WorkflowBuildInput, ImportOptions))
+	if (!Runner->BuildFromWorkflow(BuildInput, ImportOptions))
 	{
-		SetStatusMessage(TEXT("Build failed. Check message log for parser/import/replacement errors."));
+		SetStatus(TEXT("Build failed. Check message log for parser/import/replacement errors."));
 		return FReply::Handled();
 	}
 
-	MoveToStep(4);
-	SetStatusMessage(TEXT("Build completed and level replacement executed."));
+	SetStep(4);
+	SetStatus(TEXT("Build completed and level replacement executed."));
 	return FReply::Handled();
 }
 
-FReply SCadMasterWorkflowWizard::HandleRestart()
+FReply SCadWorkflowWizard::RestartWorkflow()
 {
-	if (ChildVisibilitySnapshot.Num() > 0)
+	if (SavedVisibility.Num() > 0)
 	{
-		RestoreChildVisibility();
+		RestoreChildVisibilityState();
 	}
 
-	ConfirmedSelectionResult = FCadMasterActorSelectionResult();
-	EditableChildren.Reset();
-	ChildVisibilitySnapshot.Reset();
-	IsolatedChildIndex = INDEX_NONE;
-	MasterGenerationResult = FCadMasterJsonGenerationResult();
-	ChildExtractionResult = FCadChildJsonExtractionResult();
-	WorkflowBuildInput = FCadMasterWorkflowBuildInput();
-	RebuildChildTypeRows();
-	MoveToStep(0);
-	SetStatusMessage(TEXT("Workflow restarted. Step 1: Set workspace folder."));
+	ConfirmedSelection = FCadMasterSelection();
+	ChildEntries.Reset();
+	SavedVisibility.Reset();
+	IsolatedIndex = INDEX_NONE;
+	MasterJsonResult = FCadMasterJsonGenerationResult();
+	ChildJsonResult = FCadChildJsonResult();
+	BuildInput = FCadMasterWorkflowBuildInput();
+	RebuildChildRows();
+	SetStep(0);
+	SetStatus(TEXT("Workflow restarted. Step 1: Set workspace folder."));
 	return FReply::Handled();
 }
 
-void SCadMasterWorkflowWizard::SetStatusMessage(const FString& InMessage)
+void SCadWorkflowWizard::SetStatus(const FString& InMessage)
 {
 	StatusMessage = InMessage;
 	UE_LOG(LogCadImporter, Display, TEXT("%s"), *InMessage);
 }
 
-void SCadMasterWorkflowWizard::MoveToStep(const int32 StepIndex)
+void SCadWorkflowWizard::SetStep(const int32 InStepIndex)
 {
-	ActiveStepIndex = FMath::Clamp(StepIndex, 0, 4);
+	StepIndex = FMath::Clamp(InStepIndex, 0, 4);
 }

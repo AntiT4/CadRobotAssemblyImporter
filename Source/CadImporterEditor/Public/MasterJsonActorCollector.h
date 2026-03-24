@@ -5,7 +5,7 @@
 
 class AActor;
 
-enum class ECadMasterHierarchyIssue : uint8
+enum class ECadHierarchyIssue : uint8
 {
 	InvalidSelection,
 	MissingDirectChildren,
@@ -13,28 +13,28 @@ enum class ECadMasterHierarchyIssue : uint8
 	DuplicateChildActorName
 };
 
-struct FCadMasterHierarchyViolation
+struct FCadHierarchyIssueInfo
 {
-	ECadMasterHierarchyIssue Issue = ECadMasterHierarchyIssue::InvalidSelection;
+	ECadHierarchyIssue Issue = ECadHierarchyIssue::InvalidSelection;
 	FString Message;
 	FString ActorName;
 	FString ActorPath;
 };
 
-struct FCadMasterActorSelectionResult
+struct FCadMasterSelection
 {
-	TWeakObjectPtr<AActor> MasterCandidateActor;
-	TArray<FCadMasterChildEntry> DirectChildren;
-	TArray<FCadMasterHierarchyViolation> Violations;
+	TWeakObjectPtr<AActor> MasterActor;
+	TArray<FCadMasterChildEntry> Children;
+	TArray<FCadHierarchyIssueInfo> Issues;
 
 	bool IsValid() const
 	{
-		return MasterCandidateActor.IsValid() && Violations.Num() == 0;
+		return MasterActor.IsValid() && Issues.Num() == 0;
 	}
 };
 
-namespace CadMasterJsonActorCollector
+namespace CadMasterSelection
 {
-	bool TryCollectFromSelection(FCadMasterActorSelectionResult& OutResult, FString& OutError);
-	bool TryCollectFromMasterActor(AActor* MasterActor, FCadMasterActorSelectionResult& OutResult, FString& OutError);
+	bool TryCollectFromSelection(FCadMasterSelection& OutResult, FString& OutError);
+	bool TryCollectFromMasterActor(AActor* MasterActor, FCadMasterSelection& OutResult, FString& OutError);
 }

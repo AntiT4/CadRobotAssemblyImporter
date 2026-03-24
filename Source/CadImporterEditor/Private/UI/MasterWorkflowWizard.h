@@ -6,63 +6,63 @@
 #include "MasterJsonGenerator.h"
 #include "Widgets/SCompoundWidget.h"
 
-class FCadImporterRunner;
+class FCadImportService;
 class SEditableTextBox;
 class SVerticalBox;
 class AActor;
 
-class SCadMasterWorkflowWizard : public SCompoundWidget
+class SCadWorkflowWizard : public SCompoundWidget
 {
 public:
-	SLATE_BEGIN_ARGS(SCadMasterWorkflowWizard)
+	SLATE_BEGIN_ARGS(SCadWorkflowWizard)
 		: _Runner(nullptr)
 	{
 	}
-		SLATE_ARGUMENT(TSharedPtr<FCadImporterRunner>, Runner)
+		SLATE_ARGUMENT(TSharedPtr<FCadImportService>, Runner)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
 
 private:
-	EActiveTimerReturnType HandleSelectionPolling(double CurrentTime, float DeltaTime);
-	void RefreshSelectionPreviewIfChanged();
-	void RebuildChildTypeRows();
-	void HandleChildTypeSelectionChanged(const int32 ChildIndex, const FString& SelectedType);
-	AActor* ResolveChildActorByPath(const FCadMasterChildEntry& ChildEntry) const;
-	void CaptureChildVisibilitySnapshot();
-	void ApplyChildVisibilityIsolation(const int32 ChildIndex);
-	void RestoreChildVisibility();
-	bool IsChildVisibilityIsolated(const int32 ChildIndex) const;
-	FReply HandleToggleChildVisibility(const int32 ChildIndex);
+	EActiveTimerReturnType PollSelection(double CurrentTime, float DeltaTime);
+	void RefreshSelectionPreview();
+	void RebuildChildRows();
+	void SetChildType(const int32 ChildIndex, const FString& SelectedType);
+	AActor* FindChildActor(const FCadMasterChildEntry& ChildEntry) const;
+	void SaveChildVisibility();
+	void IsolateChildVisibility(const int32 ChildIndex);
+	void RestoreChildVisibilityState();
+	bool IsChildIsolated(const int32 ChildIndex) const;
+	FReply ToggleChildVisibility(const int32 ChildIndex);
 
 	FReply HandleBrowseWorkspace();
 	FReply HandleApplyWorkspace();
 	FReply HandleBack();
-	FReply HandleConfirmMasterActor();
-	FReply HandleGenerateJson();
-	FReply HandleBuildActor();
-	FReply HandleRestart();
+	FReply ConfirmMaster();
+	FReply GenerateWorkflowJson();
+	FReply BuildAssembly();
+	FReply RestartWorkflow();
 
-	void SetStatusMessage(const FString& InMessage);
-	void MoveToStep(const int32 StepIndex);
+	void SetStatus(const FString& InMessage);
+	void SetStep(const int32 StepIndex);
 
-	TSharedPtr<FCadImporterRunner> Runner;
+	TSharedPtr<FCadImportService> Runner;
 	TSharedPtr<SEditableTextBox> WorkspaceTextBox;
 	TSharedPtr<SVerticalBox> ChildTypeRowsBox;
 
 	FString WorkspaceFolder;
 	FString StatusMessage;
 	FString SelectionPreviewText;
-	FString LastSelectionSignature;
-	int32 ActiveStepIndex = 0;
-	TArray<TSharedPtr<FString>> ChildTypeOptions;
-	FCadMasterActorSelectionResult ConfirmedSelectionResult;
-	TArray<FCadMasterChildEntry> EditableChildren;
-	TMap<FString, bool> ChildVisibilitySnapshot;
-	int32 IsolatedChildIndex = INDEX_NONE;
+	FString SelectionKey;
+	int32 StepIndex = 0;
+	TArray<TSharedPtr<FString>> ChildTypeItems;
+	FCadMasterSelection ConfirmedSelection;
+	TArray<FCadMasterChildEntry> ChildEntries;
+	TMap<FString, bool> SavedVisibility;
+	int32 IsolatedIndex = INDEX_NONE;
 
-	FCadMasterJsonGenerationResult MasterGenerationResult;
-	FCadChildJsonExtractionResult ChildExtractionResult;
-	FCadMasterWorkflowBuildInput WorkflowBuildInput;
+	FCadMasterJsonGenerationResult MasterJsonResult;
+	FCadChildJsonResult ChildJsonResult;
+	FCadMasterWorkflowBuildInput BuildInput;
 	FCadFbxImportOptions ImportOptions;
 };

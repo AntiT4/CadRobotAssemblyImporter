@@ -606,7 +606,7 @@ namespace
 	}
 }
 
-namespace CadMasterChildJsonExtractor
+namespace CadChildJsonService
 {
 	bool TryParseMasterDocument(
 		const FString& MasterJsonPath,
@@ -739,10 +739,10 @@ namespace CadMasterChildJsonExtractor
 	bool TryExtractChildJsonFilesFromDocument(
 		const FString& MasterJsonPath,
 		const FCadMasterJsonDocument& MasterDocument,
-		FCadChildJsonExtractionResult& OutResult,
+		FCadChildJsonResult& OutResult,
 		FString& OutError)
 	{
-		OutResult = FCadChildJsonExtractionResult();
+		OutResult = FCadChildJsonResult();
 		OutError.Reset();
 
 		const FString WorkspaceFolder = FPaths::ConvertRelativePathToFull(MasterDocument.WorkspaceFolder);
@@ -791,7 +791,7 @@ namespace CadMasterChildJsonExtractor
 
 	bool TryExtractChildJsonFiles(
 		const FString& MasterJsonPath,
-		FCadChildJsonExtractionResult& OutResult,
+		FCadChildJsonResult& OutResult,
 		FString& OutError)
 	{
 		FCadMasterJsonDocument MasterDocument;

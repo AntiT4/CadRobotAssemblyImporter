@@ -121,8 +121,8 @@ namespace
 
 	bool TryBuildDocument(
 		AActor& MasterActor,
-		const FCadMasterActorSelectionResult& SelectionResult,
-		const FCadMasterWorkflowWorkspacePaths& WorkspacePaths,
+		const FCadMasterSelection& SelectionResult,
+		const FCadWorkspacePaths& WorkspacePaths,
 		FCadMasterJsonDocument& OutDocument,
 		FString& OutError)
 	{
@@ -139,13 +139,13 @@ namespace
 		OutDocument.WorkspaceFolder = WorkspacePaths.WorkspaceFolder;
 		OutDocument.ChildJsonFolderName = FPaths::GetCleanFilename(WorkspacePaths.ChildJsonFolderPath);
 		OutDocument.ContentRootPath = WorkspacePaths.ContentRootPath;
-		OutDocument.Children = SelectionResult.DirectChildren;
+		OutDocument.Children = SelectionResult.Children;
 		return true;
 	}
 
 	bool TryGenerateInternal(
 		AActor& MasterActor,
-		const FCadMasterActorSelectionResult& SelectionResult,
+		const FCadMasterSelection& SelectionResult,
 		const FString& WorkspaceFolderOverride,
 		FCadMasterJsonGenerationResult& OutResult,
 		FString& OutError)
@@ -153,8 +153,8 @@ namespace
 		const FString WorkspaceFolderInput = ResolveWorkspaceFolderInput(MasterActor, WorkspaceFolderOverride);
 		const FString MasterNameInput = ResolveMasterNameInput(MasterActor);
 
-		FCadMasterWorkflowWorkspacePaths WorkspacePaths;
-		if (!CadMasterJsonWorkspaceService::TryPrepareWorkspace(WorkspaceFolderInput, MasterNameInput, WorkspacePaths, OutError))
+		FCadWorkspacePaths WorkspacePaths;
+		if (!CadWorkspaceService::TryPrepareWorkspace(WorkspaceFolderInput, MasterNameInput, WorkspacePaths, OutError))
 		{
 			return false;
 		}
@@ -181,7 +181,7 @@ namespace
 namespace CadMasterJsonGenerator
 {
 	bool TryGenerateAndWriteFromSelectionResult(
-		const FCadMasterActorSelectionResult& SelectionResult,
+		const FCadMasterSelection& SelectionResult,
 		const FString& WorkspaceFolderOverride,
 		FCadMasterJsonGenerationResult& OutResult,
 		FString& OutError)
@@ -192,7 +192,7 @@ namespace CadMasterJsonGenerator
 			return false;
 		}
 
-		AActor* MasterActor = SelectionResult.MasterCandidateActor.Get();
+		AActor* MasterActor = SelectionResult.MasterActor.Get();
 		if (!MasterActor)
 		{
 			OutError = TEXT("Selected master-candidate actor is invalid.");
@@ -207,8 +207,8 @@ namespace CadMasterJsonGenerator
 		FCadMasterJsonGenerationResult& OutResult,
 		FString& OutError)
 	{
-		FCadMasterActorSelectionResult SelectionResult;
-		if (!CadMasterJsonActorCollector::TryCollectFromSelection(SelectionResult, OutError))
+		FCadMasterSelection SelectionResult;
+		if (!CadMasterSelection::TryCollectFromSelection(SelectionResult, OutError))
 		{
 			return false;
 		}
@@ -227,8 +227,8 @@ namespace CadMasterJsonGenerator
 			return false;
 		}
 
-		FCadMasterActorSelectionResult SelectionResult;
-		if (!CadMasterJsonActorCollector::TryCollectFromMasterActor(MasterActor, SelectionResult, OutError))
+		FCadMasterSelection SelectionResult;
+		if (!CadMasterSelection::TryCollectFromMasterActor(MasterActor, SelectionResult, OutError))
 		{
 			return false;
 		}

@@ -3,7 +3,7 @@
 #include "CoreMinimal.h"
 #include "WorkflowTypes.h"
 
-struct FCadChildJsonExtractionResult
+struct FCadChildJsonResult
 {
 	FString MasterJsonPath;
 	FString ChildJsonFolderPath;
@@ -12,7 +12,7 @@ struct FCadChildJsonExtractionResult
 	TArray<FString> GeneratedChildJsonPaths;
 };
 
-namespace CadMasterChildJsonExtractor
+namespace CadChildJsonService
 {
 	bool TryParseMasterDocument(
 		const FString& MasterJsonPath,
@@ -22,11 +22,11 @@ namespace CadMasterChildJsonExtractor
 	bool TryExtractChildJsonFilesFromDocument(
 		const FString& MasterJsonPath,
 		const FCadMasterJsonDocument& MasterDocument,
-		FCadChildJsonExtractionResult& OutResult,
+		FCadChildJsonResult& OutResult,
 		FString& OutError);
 
 	bool TryExtractChildJsonFiles(
 		const FString& MasterJsonPath,
-		FCadChildJsonExtractionResult& OutResult,
+		FCadChildJsonResult& OutResult,
 		FString& OutError);
 }

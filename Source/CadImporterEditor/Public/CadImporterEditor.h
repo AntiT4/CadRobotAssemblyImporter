@@ -6,7 +6,7 @@
 #include "Logging/LogMacros.h"
 #include "Modules/ModuleManager.h"
 
-class FCadImporterRunner;
+class FCadImportService;
 
 class FCadImporterEditorModule : public IModuleInterface
 {
@@ -16,15 +16,12 @@ public:
 	virtual void StartupModule() override;
 	virtual void ShutdownModule() override;
 	
-	/** This function will be bound to Command. */
-	void PluginButtonClicked();
-	
 private:
 	void RegisterMenus();
-	void OpenMasterWorkflowWizardPopup();
+	void OpenWorkflowWindow();
 
 private:
-	TSharedPtr<FCadImporterRunner> WizardRunner;
+	TSharedPtr<FCadImportService> ImportService;
 };
 
 DECLARE_LOG_CATEGORY_EXTERN(LogCadImporter, Log, All);

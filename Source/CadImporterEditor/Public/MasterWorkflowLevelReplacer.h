@@ -5,7 +5,7 @@
 
 class UBlueprint;
 
-struct FCadMasterWorkflowReplaceResult
+struct FCadLevelReplaceResult
 {
 	FString MasterActorPath;
 	FString SpawnedActorPath;
@@ -13,12 +13,12 @@ struct FCadMasterWorkflowReplaceResult
 	int32 DeletedActorCount = 0;
 };
 
-namespace CadMasterWorkflowLevelReplacer
+namespace CadLevelReplacer
 {
 	bool TryReplaceMasterHierarchyWithBlueprints(
 		const FCadMasterJsonDocument& MasterDocument,
 		UBlueprint* MasterBlueprint,
 		const TMap<FString, UBlueprint*>& ChildBlueprintsByChildName,
-		FCadMasterWorkflowReplaceResult& OutResult,
+		FCadLevelReplaceResult& OutResult,
 		FString& OutError);
 }

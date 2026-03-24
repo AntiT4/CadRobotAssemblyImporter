@@ -80,7 +80,7 @@ namespace
 	}
 }
 
-bool FCadImporterRunner::RunImport(const FString& JsonPath, const FCadFbxImportOptions& ImportOptions) const
+bool FCadImportService::RunImport(const FString& JsonPath, const FCadFbxImportOptions& ImportOptions) const
 {
 	FCadImportModel Model;
 	FString Error;
@@ -98,7 +98,7 @@ bool FCadImporterRunner::RunImport(const FString& JsonPath, const FCadFbxImportO
 	return true;
 }
 
-bool FCadImporterRunner::RunMasterWorkflowImport(const FCadMasterWorkflowBuildInput& BuildInput, const FCadFbxImportOptions& ImportOptions) const
+bool FCadImportService::BuildFromWorkflow(const FCadMasterWorkflowBuildInput& BuildInput, const FCadFbxImportOptions& ImportOptions) const
 {
 	FString Error;
 	const FString MasterJsonPath = BuildInput.MasterJsonPath.TrimStartAndEnd();
@@ -108,7 +108,7 @@ bool FCadImporterRunner::RunMasterWorkflowImport(const FCadMasterWorkflowBuildIn
 	}
 
 	FCadMasterJsonDocument MasterDocument;
-	if (!CadMasterChildJsonExtractor::TryParseMasterDocument(MasterJsonPath, MasterDocument, Error))
+	if (!CadChildJsonService::TryParseMasterDocument(MasterJsonPath, MasterDocument, Error))
 	{
 		return ReportFailure(TEXT("Master workflow parse failed"), TEXT("Master workflow parse failed"), Error);
 	}
@@ -190,8 +190,8 @@ bool FCadImporterRunner::RunMasterWorkflowImport(const FCadMasterWorkflowBuildIn
 			ChildBlueprint ? *ChildBlueprint->GetPathName() : TEXT("(null)"));
 	}
 
-	FCadMasterWorkflowReplaceResult ReplaceResult;
-	if (!CadMasterWorkflowLevelReplacer::TryReplaceMasterHierarchyWithBlueprints(
+	FCadLevelReplaceResult ReplaceResult;
+	if (!CadLevelReplacer::TryReplaceMasterHierarchyWithBlueprints(
 		MasterDocument,
 		MasterBlueprint,
 		ChildBlueprintsByChildName,
@@ -208,12 +208,12 @@ bool FCadImporterRunner::RunMasterWorkflowImport(const FCadMasterWorkflowBuildIn
 	return true;
 }
 
-bool FCadImporterRunner::SelectJsonFile(FString& OutJsonPath) const
+bool FCadImportService::SelectJsonFile(FString& OutJsonPath) const
 {
 	return SelectJsonPath(false, TEXT("Select CAD JSON"), TEXT(""), OutJsonPath);
 }
 
-bool FCadImporterRunner::SelectOutputJsonFile(FString& OutJsonPath) const
+bool FCadImportService::SelectJsonSavePath(FString& OutJsonPath) const
 {
 	return SelectJsonPath(true, TEXT("Save CAD JSON"), TEXT("ActorExport.json"), OutJsonPath);
 }

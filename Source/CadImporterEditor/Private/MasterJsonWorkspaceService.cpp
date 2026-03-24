@@ -74,9 +74,9 @@ namespace
 		return true;
 	}
 
-	bool EnsureContentFolder(const FString& ContentRootPath, const FString& ContentDiskFolderPath, FString& OutError)
+	bool EnsureContentFolder(const FString& ContentRootPath, const FString& ContentDir, FString& OutError)
 	{
-		if (!EnsureDirectoryExists(ContentDiskFolderPath, OutError))
+		if (!EnsureDirectoryExists(ContentDir, OutError))
 		{
 			return false;
 		}
@@ -89,15 +89,15 @@ namespace
 	}
 }
 
-namespace CadMasterJsonWorkspaceService
+namespace CadWorkspaceService
 {
 	bool TryPrepareWorkspace(
 		const FString& WorkspaceFolderInput,
 		const FString& MasterNameInput,
-		FCadMasterWorkflowWorkspacePaths& OutPaths,
+		FCadWorkspacePaths& OutPaths,
 		FString& OutError)
 	{
-		OutPaths = FCadMasterWorkflowWorkspacePaths();
+		OutPaths = FCadWorkspacePaths();
 		OutError.Reset();
 
 		FString WorkspaceFolder;
@@ -110,7 +110,7 @@ namespace CadMasterJsonWorkspaceService
 		const FString MasterJsonPath = FPaths::Combine(WorkspaceFolder, FString::Printf(TEXT("%s.json"), *MasterName));
 		const FString ChildJsonFolderPath = FPaths::Combine(WorkspaceFolder, MasterName);
 		const FString ContentRootPath = FString::Printf(TEXT("/Game/%s"), *MasterName);
-		const FString ContentDiskFolderPath = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectContentDir(), MasterName));
+		const FString ContentDir = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectContentDir(), MasterName));
 
 		if (!EnsureDirectoryExists(WorkspaceFolder, OutError))
 		{
@@ -122,7 +122,7 @@ namespace CadMasterJsonWorkspaceService
 			return false;
 		}
 
-		if (!EnsureContentFolder(ContentRootPath, ContentDiskFolderPath, OutError))
+		if (!EnsureContentFolder(ContentRootPath, ContentDir, OutError))
 		{
 			return false;
 		}
@@ -132,16 +132,16 @@ namespace CadMasterJsonWorkspaceService
 		OutPaths.MasterJsonPath = MasterJsonPath;
 		OutPaths.ChildJsonFolderPath = ChildJsonFolderPath;
 		OutPaths.ContentRootPath = ContentRootPath;
-		OutPaths.ContentDiskFolderPath = ContentDiskFolderPath;
+		OutPaths.ContentDir = ContentDir;
 		return true;
 	}
 
 	bool TryPrepareWorkspaceForMasterActor(
 		const ACadMasterActor* MasterActor,
-		FCadMasterWorkflowWorkspacePaths& OutPaths,
+		FCadWorkspacePaths& OutPaths,
 		FString& OutError)
 	{
-		OutPaths = FCadMasterWorkflowWorkspacePaths();
+		OutPaths = FCadWorkspacePaths();
 		OutError.Reset();
 
 		if (!MasterActor)
