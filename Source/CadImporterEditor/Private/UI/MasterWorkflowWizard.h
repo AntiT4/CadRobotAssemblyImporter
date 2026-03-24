@@ -28,7 +28,6 @@ private:
 	void RefreshSelectionPreview();
 	void RebuildChildRows();
 	void SetChildType(const int32 ChildIndex, const FString& SelectedType);
-	AActor* FindChildActor(const FCadChildEntry& ChildEntry) const;
 	void SaveChildVisibility();
 	void IsolateChildVisibility(const int32 ChildIndex);
 	void RestoreChildVisibilityState();

@@ -3,14 +3,13 @@
 #include "ImportRunner.h"
 #include "CadImporterEditor.h"
 #include "DesktopPlatformModule.h"
+#include "Editor/ActorHierarchyUtils.h"
 #include "Editor.h"
 #include "Engine/Selection.h"
 #include "Framework/Application/SlateApplication.h"
-#include "HAL/FileManager.h"
-#include "HAL/PlatformFileManager.h"
 #include "IDesktopPlatform.h"
 #include "Misc/Paths.h"
-#include "UObject/UObjectGlobals.h"
+#include "Workflow/WorkspaceUtils.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SComboBox.h"
 #include "Widgets/Input/SEditableTextBox.h"
@@ -46,134 +45,6 @@ namespace
 		return false;
 	}
 
-	void CollectActorHierarchyForVisibility(AActor* RootActor, TArray<AActor*>& OutActors)
-	{
-		OutActors.Reset();
-		if (!RootActor)
-		{
-			return;
-		}
-
-		OutActors.Add(RootActor);
-
-		TArray<AActor*> AttachedActors;
-		RootActor->GetAttachedActors(AttachedActors, true, true);
-		for (AActor* AttachedActor : AttachedActors)
-		{
-			if (AttachedActor)
-			{
-				OutActors.Add(AttachedActor);
-			}
-		}
-	}
-
-	struct FAnyDirectoryEntryVisitor final : IPlatformFile::FDirectoryVisitor
-	{
-		bool bFoundAnyEntry = false;
-
-		virtual bool Visit(const TCHAR* FilenameOrDirectory, bool bIsDirectory) override
-		{
-			static_cast<void>(FilenameOrDirectory);
-			static_cast<void>(bIsDirectory);
-			bFoundAnyEntry = true;
-			return false;
-		}
-	};
-
-	bool TryNormalizeWorkspacePath(const FString& WorkspaceInput, FString& OutTrimmedWorkspace, FString& OutNormalizedWorkspace, FString& OutError)
-	{
-		OutTrimmedWorkspace.Reset();
-		OutNormalizedWorkspace.Reset();
-		OutError.Reset();
-
-		OutTrimmedWorkspace = WorkspaceInput.TrimStartAndEnd();
-		if (OutTrimmedWorkspace.IsEmpty())
-		{
-			OutError = TEXT("Workspace path is empty. Apply a valid workspace folder first.");
-			return false;
-		}
-
-		FString NormalizedWorkspace = OutTrimmedWorkspace;
-		if (FPaths::IsRelative(NormalizedWorkspace))
-		{
-			NormalizedWorkspace = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), NormalizedWorkspace));
-		}
-		else
-		{
-			NormalizedWorkspace = FPaths::ConvertRelativePathToFull(NormalizedWorkspace);
-		}
-		FPaths::NormalizeDirectoryName(NormalizedWorkspace);
-
-		if (NormalizedWorkspace.IsEmpty())
-		{
-			OutError = TEXT("Workspace path normalization produced an empty value.");
-			return false;
-		}
-
-		OutNormalizedWorkspace = MoveTemp(NormalizedWorkspace);
-		return true;
-	}
-
-	bool TryValidateWorkspaceForApply(const FString& WorkspaceInput, FString& OutNormalizedWorkspace, FString& OutError)
-	{
-		FString TrimmedWorkspace;
-		if (!TryNormalizeWorkspacePath(WorkspaceInput, TrimmedWorkspace, OutNormalizedWorkspace, OutError))
-		{
-			return false;
-		}
-
-		IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
-		const bool bWorkspaceDirectoryExists = PlatformFile.DirectoryExists(*OutNormalizedWorkspace);
-
-		bool bWorkspaceDirectoryEmpty = true;
-		if (bWorkspaceDirectoryExists)
-		{
-			FAnyDirectoryEntryVisitor Visitor;
-			PlatformFile.IterateDirectory(*OutNormalizedWorkspace, Visitor);
-			bWorkspaceDirectoryEmpty = !Visitor.bFoundAnyEntry;
-		}
-
-		UE_LOG(
-			LogCadImporter,
-			Display,
-			TEXT("Workspace validation before apply: raw='%s', trimmed='%s', normalized='%s', exists=%s, empty=%s"),
-			*WorkspaceInput,
-			*TrimmedWorkspace,
-			*OutNormalizedWorkspace,
-			bWorkspaceDirectoryExists ? TEXT("true") : TEXT("false"),
-			bWorkspaceDirectoryEmpty ? TEXT("true") : TEXT("false"));
-
-		if (bWorkspaceDirectoryExists && !bWorkspaceDirectoryEmpty)
-		{
-			OutError = FString::Printf(
-				TEXT("Workspace folder is not empty. Choose an empty folder or create a new one.\npath=%s"),
-				*OutNormalizedWorkspace);
-			return false;
-		}
-
-		return true;
-	}
-
-	bool TryValidateWorkspaceForGeneration(const FString& WorkspaceInput, FString& OutNormalizedWorkspace, FString& OutError)
-	{
-		FString TrimmedWorkspace;
-		if (!TryNormalizeWorkspacePath(WorkspaceInput, TrimmedWorkspace, OutNormalizedWorkspace, OutError))
-		{
-			return false;
-		}
-
-		const bool bWorkspaceDirectoryExists = IFileManager::Get().DirectoryExists(*OutNormalizedWorkspace);
-		UE_LOG(
-			LogCadImporter,
-			Display,
-			TEXT("Workspace validation before generation: raw='%s', trimmed='%s', normalized='%s', exists=%s"),
-			*WorkspaceInput,
-			*TrimmedWorkspace,
-			*OutNormalizedWorkspace,
-			bWorkspaceDirectoryExists ? TEXT("true") : TEXT("false"));
-
-		return true;
-	}
 }
 
 void SCadWorkflowWizard::Construct(const FArguments& InArgs)
@@ -586,11 +457,7 @@ void SCadWorkflowWizard::RefreshSelectionPreview()
 	}
 
 	TArray<AActor*> DirectChildren;
-	SingleSelectedActor->GetAttachedActors(DirectChildren, false, false);
-	DirectChildren.Sort([](const AActor& Left, const AActor& Right)
-	{
-		return Left.GetActorNameOrLabel() < Right.GetActorNameOrLabel();
-	});
+	CadActorHierarchyUtils::GetSortedAttachedChildren(SingleSelectedActor, DirectChildren, false);
 
 	FString Result = FString::Printf(
 		TEXT("Selected: %s\nPath: %s\nDirect Children: %d"),
@@ -715,70 +582,14 @@ void SCadWorkflowWizard::SetChildType(const int32 ChildIndex, const FString& Sel
 	ChildEntries[ChildIndex].ActorType = ParsedType;
 }
 
-AActor* SCadWorkflowWizard::FindChildActor(const FCadChildEntry& ChildEntry) const
-{
-	if (ChildEntry.ActorPath.TrimStartAndEnd().IsEmpty())
-	{
-		return nullptr;
-	}
-
-	return FindObject<AActor>(nullptr, *ChildEntry.ActorPath);
-}
-
 void SCadWorkflowWizard::SaveChildVisibility()
 {
-	SavedVisibility.Reset();
-	TArray<AActor*> HierarchyActors;
-
-	for (const FCadChildEntry& ChildEntry : ChildEntries)
-	{
-		AActor* ChildActor = FindChildActor(ChildEntry);
-		if (!ChildActor)
-		{
-			continue;
-		}
-
-		CollectActorHierarchyForVisibility(ChildActor, HierarchyActors);
-		for (AActor* HierarchyActor : HierarchyActors)
-		{
-			if (!HierarchyActor)
-			{
-				continue;
-			}
-
-			const FString ActorPath = HierarchyActor->GetPathName();
-			if (SavedVisibility.Contains(ActorPath))
-			{
-				continue;
-			}
-
-			SavedVisibility.Add(ActorPath, HierarchyActor->IsTemporarilyHiddenInEditor());
-		}
-	}
+	CadActorHierarchyUtils::SaveVisibilitySnapshot(ChildEntries, SavedVisibility);
 }
 
 void SCadWorkflowWizard::IsolateChildVisibility(const int32 ChildIndex)
 {
-	TArray<AActor*> HierarchyActors;
-
-	for (int32 Index = 0; Index < ChildEntries.Num(); ++Index)
-	{
-		AActor* ChildActor = FindChildActor(ChildEntries[Index]);
-		if (!ChildActor)
-		{
-			continue;
-		}
-
-		const bool bHideInEditor = (Index != ChildIndex);
-		CollectActorHierarchyForVisibility(ChildActor, HierarchyActors);
-		for (AActor* HierarchyActor : HierarchyActors)
-		{
-			if (HierarchyActor)
-			{
-				HierarchyActor->SetIsTemporarilyHiddenInEditor(bHideInEditor);
-			}
-		}
-	}
+	CadActorHierarchyUtils::ApplyVisibilityIsolation(ChildEntries, ChildIndex);
 
 	if (GEditor)
 	{
@@ -788,16 +599,7 @@ void SCadWorkflowWizard::IsolateChildVisibility(const int32 ChildIndex)
 
 void SCadWorkflowWizard::RestoreChildVisibilityState()
 {
-	for (const TPair<FString, bool>& SnapshotEntry : SavedVisibility)
-	{
-		AActor* Actor = FindObject<AActor>(nullptr, *SnapshotEntry.Key);
-		if (!Actor)
-		{
-			continue;
-		}
-
-		Actor->SetIsTemporarilyHiddenInEditor(SnapshotEntry.Value);
-	}
+	CadActorHierarchyUtils::RestoreVisibilitySnapshot(SavedVisibility);
 
 	SavedVisibility.Reset();
 	IsolatedIndex = INDEX_NONE;
@@ -880,7 +682,7 @@ FReply SCadWorkflowWizard::HandleApplyWorkspace()
 {
 	FString NormalizedWorkspace;
 	FString WorkspaceValidationError;
-	if (!TryValidateWorkspaceForApply(WorkspaceFolder, NormalizedWorkspace, WorkspaceValidationError))
+	if (!CadWorkspaceUtils::TryValidateForApply(WorkspaceFolder, NormalizedWorkspace, WorkspaceValidationError))
 	{
 		SetStatus(FString::Printf(TEXT("Workspace apply failed:\n%s"), *WorkspaceValidationError));
 		return FReply::Handled();
@@ -918,7 +720,7 @@ FReply SCadWorkflowWizard::ConfirmMaster()
 
 	FString NormalizedWorkspace;
 	FString WorkspaceValidationError;
-	if (!TryValidateWorkspaceForGeneration(WorkspaceFolder, NormalizedWorkspace, WorkspaceValidationError))
+	if (!CadWorkspaceUtils::TryValidateForGeneration(WorkspaceFolder, NormalizedWorkspace, WorkspaceValidationError))
 	{
 		SetStatus(FString::Printf(TEXT("Master actor confirmation failed:\n%s"), *WorkspaceValidationError));
 		return FReply::Handled();
@@ -972,7 +774,7 @@ FReply SCadWorkflowWizard::GenerateWorkflowJson()
 
 	FString NormalizedWorkspace;
 	FString WorkspaceValidationError;
-	if (!TryValidateWorkspaceForGeneration(WorkspaceFolder, NormalizedWorkspace, WorkspaceValidationError))
+	if (!CadWorkspaceUtils::TryValidateForGeneration(WorkspaceFolder, NormalizedWorkspace, WorkspaceValidationError))
 	{
 		SetStatus(FString::Printf(TEXT("Generate JSON failed:\n%s"), *WorkspaceValidationError));
 		return FReply::Handled();

@@ -1,104 +1,12 @@
 #include "MasterWorkflowImportParser.h"
 
 #include "Dom/JsonObject.h"
+#include "Json/CadJsonTransformUtils.h"
 #include "Misc/FileHelper.h"
 #include "Serialization/JsonSerializer.h"
 
 namespace
 {
-	bool ParseTransformArray3(
-		const TSharedPtr<FJsonObject>& Object,
-		const TCHAR* FieldName,
-		TArray<double>& OutValues,
-		FString& OutError)
-	{
-		OutValues.Reset();
-		const TArray<TSharedPtr<FJsonValue>>* ArrayValues = nullptr;
-		if (!Object->TryGetArrayField(FieldName, ArrayValues) || !ArrayValues)
-		{
-			OutError = FString::Printf(TEXT("Missing transform field: %s"), FieldName);
-			return false;
-		}
-
-		if (ArrayValues->Num() != 3)
-		{
-			OutError = FString::Printf(TEXT("Transform field '%s' must contain exactly 3 numbers."), FieldName);
-			return false;
-		}
-
-		for (int32 Index = 0; Index < 3; ++Index)
-		{
-			double NumberValue = 0.0;
-			if (!(*ArrayValues)[Index].IsValid() || !(*ArrayValues)[Index]->TryGetNumber(NumberValue))
-			{
-				OutError = FString::Printf(TEXT("Transform field '%s' contains a non-number at index %d."), FieldName, Index);
-				return false;
-			}
-			OutValues.Add(NumberValue);
-		}
-
-		return true;
-	}
-
-	bool ParseTransformObject(const TSharedPtr<FJsonObject>& TransformObject, FTransform& OutTransform, FString& OutError)
-	{
-		if (!TransformObject.IsValid())
-		{
-			OutError = TEXT("Transform object is invalid.");
-			return false;
-		}
-
-		TArray<double> LocationValues;
-		TArray<double> RotationValues;
-		TArray<double> ScaleValues;
-		if (!ParseTransformArray3(TransformObject, TEXT("location"), LocationValues, OutError) ||
-			!ParseTransformArray3(TransformObject, TEXT("rotation"), RotationValues, OutError) ||
-			!ParseTransformArray3(TransformObject, TEXT("scale"), ScaleValues, OutError))
-		{
-			return false;
-		}
-
-		const FVector Location(LocationValues[0], LocationValues[1], LocationValues[2]);
-		const FRotator Rotation(RotationValues[1], RotationValues[2], RotationValues[0]);
-		const FVector Scale(ScaleValues[0], ScaleValues[1], ScaleValues[2]);
-		OutTransform = FTransform(Rotation, Location, Scale);
-		return true;
-	}
-
-	bool ParseVectorArray3(
-		const TSharedPtr<FJsonObject>& Object,
-		const TCHAR* FieldName,
-		FVector& OutVector,
-		FString& OutError)
-	{
-		const TArray<TSharedPtr<FJsonValue>>* AxisArray = nullptr;
-		if (!Object->TryGetArrayField(FieldName, AxisArray) || !AxisArray)
-		{
-			OutError = FString::Printf(TEXT("Missing vector field: %s"), FieldName);
-			return false;
-		}
-
-		if (AxisArray->Num() != 3)
-		{
-			OutError = FString::Printf(TEXT("Vector field '%s' must contain exactly 3 numbers."), FieldName);
-			return false;
-		}
-
-		double X = 0.0;
-		double Y = 0.0;
-		double Z = 0.0;
-		if (!(*AxisArray)[0]->TryGetNumber(X) ||
-			!(*AxisArray)[1]->TryGetNumber(Y) ||
-			!(*AxisArray)[2]->TryGetNumber(Z))
-		{
-			OutError = FString::Printf(TEXT("Vector field '%s' contains non-number values."), FieldName);
-			return false;
-		}
-
-		OutVector = FVector(X, Y, Z);
-		return true;
-	}
-
 	bool ParseChildActorType(const FString& RawType, ECadMasterChildActorType& OutType, FString& OutError)
 	{
 		if (RawType.TrimStartAndEnd().IsEmpty())
@@ -210,7 +118,7 @@ namespace CadMasterWorkflowImportParser
 			OutError = FString::Printf(TEXT("Child '%s' is missing 'relative_transform'."), *OutDocument.ChildActorName);
 			return false;
 		}
-		if (!ParseTransformObject(*RelativeTransformObject, OutDocument.RelativeTransform, OutError))
+		if (!CadJsonTransformUtils::ParseTransformObject(*RelativeTransformObject, OutDocument.RelativeTransform, OutError))
 		{
 			OutError = FString::Printf(TEXT("Child '%s' transform parse failed: %s"), *OutDocument.ChildActorName, *OutError);
 			return false;
@@ -247,7 +155,7 @@ namespace CadMasterWorkflowImportParser
 					VisualTransformObject &&
 					VisualTransformObject->IsValid())
 				{
-					if (!ParseTransformObject(*VisualTransformObject, VisualEntry.RelativeTransform, OutError))
+					if (!CadJsonTransformUtils::ParseTransformObject(*VisualTransformObject, VisualEntry.RelativeTransform, OutError))
 					{
 						OutError = FString::Printf(TEXT("Child '%s' visual[%d] transform parse failed: %s"), *OutDocument.ChildActorName, VisualIndex, *OutError);
 						return false;
@@ -284,7 +192,7 @@ namespace CadMasterWorkflowImportParser
 					LinkTransformObject &&
 					LinkTransformObject->IsValid())
 				{
-					if (!ParseTransformObject(*LinkTransformObject, LinkTemplate.RelativeTransform, OutError))
+					if (!CadJsonTransformUtils::ParseTransformObject(*LinkTransformObject, LinkTemplate.RelativeTransform, OutError))
 					{
 						OutError = FString::Printf(TEXT("Child '%s' link[%d] transform parse failed: %s"), *OutDocument.ChildActorName, LinkIndex, *OutError);
 						return false;
@@ -319,7 +227,7 @@ namespace CadMasterWorkflowImportParser
 							VisualTransformObject &&
 							VisualTransformObject->IsValid())
 						{
-							if (!ParseTransformObject(*VisualTransformObject, VisualEntry.RelativeTransform, OutError))
+							if (!CadJsonTransformUtils::ParseTransformObject(*VisualTransformObject, VisualEntry.RelativeTransform, OutError))
 							{
 								OutError = FString::Printf(
 									TEXT("Child '%s' link[%d] visual[%d] transform parse failed: %s"),
@@ -374,7 +282,7 @@ namespace CadMasterWorkflowImportParser
 
 				FVector Axis = FVector::UpVector;
 				FString AxisParseError;
-				if (JointObject->HasField(TEXT("axis")) && !ParseVectorArray3(JointObject, TEXT("axis"), Axis, AxisParseError))
+				if (JointObject->HasField(TEXT("axis")) && !CadJsonTransformUtils::ParseVectorArray3(JointObject, TEXT("axis"), Axis, AxisParseError))
 				{
 					OutError = FString::Printf(TEXT("Child '%s' joint[%d] axis parse failed: %s"), *OutDocument.ChildActorName, JointIndex, *AxisParseError);
 					return false;

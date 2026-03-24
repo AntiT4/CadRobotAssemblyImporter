@@ -1,18 +1,16 @@
 #include "MasterChildJsonExtractor.h"
 
 #include "CadImporterEditor.h"
-#include "Components/StaticMeshComponent.h"
+#include "Editor/ActorHierarchyUtils.h"
 #include "Dom/JsonObject.h"
-#include "Editor.h"
-#include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
 #include "HAL/PlatformFileManager.h"
-#include "Materials/MaterialInterface.h"
+#include "Json/CadJsonTransformUtils.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
-#include "UObject/UObjectGlobals.h"
+#include "Workflow/ChildVisualCollector.h"
 
 namespace
 {
@@ -42,216 +40,9 @@ namespace
 		}
 	}
 
-	FString GetActorDisplayNameForMasterChildExtractor(const AActor* Actor)
+	FString GetActorDisplayNameForExtractor(const AActor* Actor)
 	{
 		return Actor ? Actor->GetActorNameOrLabel() : TEXT("(none)");
-	}
-
-	void GetSortedAttachedChildrenForMasterChildExtractor(AActor* Actor, TArray<AActor*>& OutChildren, const bool bRecursive = false)
-	{
-		OutChildren.Reset();
-		if (!Actor)
-		{
-			return;
-		}
-
-		Actor->GetAttachedActors(OutChildren, false, bRecursive);
-		OutChildren.Sort([](const AActor& Left, const AActor& Right)
-		{
-			return Left.GetActorNameOrLabel() < Right.GetActorNameOrLabel();
-		});
-	}
-
-	FString GetAssetPackagePath(const UObject* Asset)
-	{
-		return Asset ? Asset->GetOutermost()->GetName() : FString();
-	}
-
-	void FillVisualMaterialOverride(const UStaticMeshComponent* MeshComponent, FCadChildVisual& OutVisual)
-	{
-		if (!MeshComponent)
-		{
-			return;
-		}
-
-		const int32 MaterialCount = MeshComponent->GetNumMaterials();
-		for (int32 MaterialIndex = 0; MaterialIndex < MaterialCount; ++MaterialIndex)
-		{
-			const UMaterialInterface* Material = MeshComponent->GetMaterial(MaterialIndex);
-			if (!Material)
-			{
-				continue;
-			}
-
-			OutVisual.MaterialPath = GetAssetPackagePath(Material);
-			OutVisual.MaterialName = Material->GetName();
-			return;
-		}
-	}
-
-	void AppendVisualsFromActor(const AActor* Actor, TArray<FCadChildVisual>& OutVisuals)
-	{
-		if (!Actor)
-		{
-			return;
-		}
-
-		TInlineComponentArray<UStaticMeshComponent*> MeshComponents(const_cast<AActor*>(Actor));
-		MeshComponents.Sort([](const UStaticMeshComponent& Left, const UStaticMeshComponent& Right)
-		{
-			return Left.GetName() < Right.GetName();
-		});
-
-		for (UStaticMeshComponent* MeshComponent : MeshComponents)
-		{
-			if (!MeshComponent)
-			{
-				continue;
-			}
-
-			const UStaticMesh* StaticMesh = MeshComponent->GetStaticMesh();
-			if (!StaticMesh)
-			{
-				continue;
-			}
-
-			FCadChildVisual Visual;
-			Visual.MeshPath = GetAssetPackagePath(StaticMesh);
-			Visual.RelativeTransform = MeshComponent->GetRelativeTransform();
-			FillVisualMaterialOverride(MeshComponent, Visual);
-			OutVisuals.Add(MoveTemp(Visual));
-		}
-	}
-
-	void AppendVisualsFromActorRelativeToRoot(const AActor* Actor, const AActor* RootActor, TArray<FCadChildVisual>& OutVisuals)
-	{
-		if (!Actor || !RootActor)
-		{
-			return;
-		}
-
-		TInlineComponentArray<UStaticMeshComponent*> MeshComponents(const_cast<AActor*>(Actor));
-		MeshComponents.Sort([](const UStaticMeshComponent& Left, const UStaticMeshComponent& Right)
-		{
-			return Left.GetName() < Right.GetName();
-		});
-
-		for (UStaticMeshComponent* MeshComponent : MeshComponents)
-		{
-			if (!MeshComponent)
-			{
-				continue;
-			}
-
-			const UStaticMesh* StaticMesh = MeshComponent->GetStaticMesh();
-			if (!StaticMesh)
-			{
-				continue;
-			}
-
-			FCadChildVisual Visual;
-			Visual.MeshPath = GetAssetPackagePath(StaticMesh);
-
-			const FTransform VisualWorldTransform = MeshComponent->GetComponentTransform();
-			Visual.RelativeTransform = VisualWorldTransform.GetRelativeTransform(RootActor->GetActorTransform());
-			FillVisualMaterialOverride(MeshComponent, Visual);
-			OutVisuals.Add(MoveTemp(Visual));
-		}
-	}
-
-	void AbsorbStaticMeshActorSubtree(AActor* RootActor, AActor* CurrentActor, TArray<FCadChildVisual>& OutVisuals)
-	{
-		if (!CurrentActor || !RootActor)
-		{
-			return;
-		}
-
-		if (CurrentActor->IsA<AStaticMeshActor>())
-		{
-			AppendVisualsFromActorRelativeToRoot(CurrentActor, RootActor, OutVisuals);
-		}
-
-		TArray<AActor*> Descendants;
-		GetSortedAttachedChildrenForMasterChildExtractor(CurrentActor, Descendants, false);
-		for (AActor* ChildActor : Descendants)
-		{
-			AbsorbStaticMeshActorSubtree(RootActor, ChildActor, OutVisuals);
-		}
-	}
-
-	void AbsorbDirectStaticMeshActorChildren(AActor* RootActor, TArray<FCadChildVisual>& OutVisuals)
-	{
-		if (!RootActor)
-		{
-			return;
-		}
-
-		TArray<AActor*> Children;
-		GetSortedAttachedChildrenForMasterChildExtractor(RootActor, Children, false);
-		for (AActor* ChildActor : Children)
-		{
-			if (ChildActor && ChildActor->IsA<AStaticMeshActor>())
-			{
-				AbsorbStaticMeshActorSubtree(RootActor, ChildActor, OutVisuals);
-			}
-		}
-	}
-
-	void AppendSubtreeVisualsRelativeToRoot(AActor* CurrentActor, const AActor* RootActor, TArray<FCadChildVisual>& OutVisuals)
-	{
-		if (!CurrentActor || !RootActor)
-		{
-			return;
-		}
-
-		AppendVisualsFromActorRelativeToRoot(CurrentActor, RootActor, OutVisuals);
-
-		TArray<AActor*> Children;
-		GetSortedAttachedChildrenForMasterChildExtractor(CurrentActor, Children, false);
-		for (AActor* ChildActor : Children)
-		{
-			AppendSubtreeVisualsRelativeToRoot(ChildActor, RootActor, OutVisuals);
-		}
-	}
-
-	AActor* ResolveActorByPath(const FString& ActorPath)
-	{
-		const FString TrimmedPath = ActorPath.TrimStartAndEnd();
-		if (TrimmedPath.IsEmpty())
-		{
-			return nullptr;
-		}
-
-		return FindObject<AActor>(nullptr, *TrimmedPath);
-	}
-
-	void CollectChildVisualsForStaticType(AActor* ChildRootActor, FCadChildDoc& InOutChildDocument)
-	{
-		if (!ChildRootActor)
-		{
-			return;
-		}
-
-		AppendVisualsFromActor(ChildRootActor, InOutChildDocument.Visuals);
-
-		TArray<AActor*> Children;
-		GetSortedAttachedChildrenForMasterChildExtractor(ChildRootActor, Children, false);
-		for (AActor* ChildActor : Children)
-		{
-			AppendSubtreeVisualsRelativeToRoot(ChildActor, ChildRootActor, InOutChildDocument.Visuals);
-		}
-	}
-
-	void CollectRootLinkVisualsForMovableType(AActor* ChildRootActor, TArray<FCadChildVisual>& OutVisuals)
-	{
-		if (!ChildRootActor)
-		{
-			return;
-		}
-
-		// Match dynamic_robot root-link collection: root visuals + direct static-mesh-actor branches.
-		AppendVisualsFromActor(ChildRootActor, OutVisuals);
-		AbsorbDirectStaticMeshActorChildren(ChildRootActor, OutVisuals);
 	}
 
 	void BuildMovableChildHierarchyRecursive(
@@ -265,7 +56,7 @@ namespace
 			return;
 		}
 
-		const FString CurrentLinkName = GetActorDisplayNameForMasterChildExtractor(CurrentActor);
+		const FString CurrentLinkName = GetActorDisplayNameForExtractor(CurrentActor);
 		const bool bIsRoot = (ParentActor == nullptr);
 
 		FCadChildLinkDef LinkTemplate;
@@ -273,12 +64,12 @@ namespace
 		LinkTemplate.RelativeTransform = bIsRoot
 			? RootRelativeTransform
 			: CurrentActor->GetActorTransform().GetRelativeTransform(ParentActor->GetActorTransform());
-		CollectRootLinkVisualsForMovableType(CurrentActor, LinkTemplate.Visuals);
+		CadChildVisualCollector::CollectRootLinkVisuals(CurrentActor, LinkTemplate.Visuals);
 		InOutChildDocument.Links.Add(MoveTemp(LinkTemplate));
 
 		if (!bIsRoot)
 		{
-			const FString ParentLinkName = GetActorDisplayNameForMasterChildExtractor(ParentActor);
+			const FString ParentLinkName = GetActorDisplayNameForExtractor(ParentActor);
 			FCadChildJointDef JointTemplate;
 			JointTemplate.JointName = FString::Printf(TEXT("%s_to_%s"), *ParentLinkName, *CurrentLinkName);
 			JointTemplate.JointType = ECadImportJointType::Fixed;
@@ -289,7 +80,7 @@ namespace
 		}
 
 		TArray<AActor*> Children;
-		GetSortedAttachedChildrenForMasterChildExtractor(CurrentActor, Children, false);
+		CadActorHierarchyUtils::GetSortedAttachedChildren(CurrentActor, Children, false);
 		for (AActor* ChildActor : Children)
 		{
 			if (ChildActor && ChildActor->IsA<AStaticMeshActor>())
@@ -332,97 +123,6 @@ namespace
 		InOutChildDocument.Joints.Insert(MoveTemp(RootAnchorJoint), 0);
 	}
 
-	bool TryParseTransformArray3(
-		const TSharedPtr<FJsonObject>& Object,
-		const TCHAR* FieldName,
-		TArray<double>& OutValues,
-		FString& OutError)
-	{
-		OutValues.Reset();
-		const TArray<TSharedPtr<FJsonValue>>* ArrayValues = nullptr;
-		if (!Object->TryGetArrayField(FieldName, ArrayValues) || !ArrayValues)
-		{
-			OutError = FString::Printf(TEXT("Missing transform field: %s"), FieldName);
-			return false;
-		}
-
-		if (ArrayValues->Num() != 3)
-		{
-			OutError = FString::Printf(TEXT("Transform field '%s' must contain exactly 3 numbers."), FieldName);
-			return false;
-		}
-
-		for (int32 Index = 0; Index < 3; ++Index)
-		{
-			double NumberValue = 0.0;
-			if (!(*ArrayValues)[Index].IsValid() || !(*ArrayValues)[Index]->TryGetNumber(NumberValue))
-			{
-				OutError = FString::Printf(TEXT("Transform field '%s' contains a non-number at index %d."), FieldName, Index);
-				return false;
-			}
-			OutValues.Add(NumberValue);
-		}
-
-		return true;
-	}
-
-	bool TryParseTransformObject(
-		const TSharedPtr<FJsonObject>& TransformObject,
-		FTransform& OutTransform,
-		FString& OutError)
-	{
-		if (!TransformObject.IsValid())
-		{
-			OutError = TEXT("Transform object is invalid.");
-			return false;
-		}
-
-		TArray<double> LocationValues;
-		TArray<double> RotationValues;
-		TArray<double> ScaleValues;
-
-		if (!TryParseTransformArray3(TransformObject, TEXT("location"), LocationValues, OutError) ||
-			!TryParseTransformArray3(TransformObject, TEXT("rotation"), RotationValues, OutError) ||
-			!TryParseTransformArray3(TransformObject, TEXT("scale"), ScaleValues, OutError))
-		{
-			return false;
-		}
-
-		const FVector Location(LocationValues[0], LocationValues[1], LocationValues[2]);
-		const FRotator Rotation(RotationValues[1], RotationValues[2], RotationValues[0]);
-		const FVector Scale(ScaleValues[0], ScaleValues[1], ScaleValues[2]);
-		OutTransform = FTransform(Rotation, Location, Scale);
-		return true;
-	}
-
-	TSharedPtr<FJsonObject> MakeMasterChildExtractorTransformObject(const FTransform& Transform)
-	{
-		const FVector Location = Transform.GetLocation();
-		const FRotator Rotation = Transform.GetRotation().Rotator();
-		const FVector Scale = Transform.GetScale3D();
-
-		TSharedPtr<FJsonObject> TransformObject = MakeShared<FJsonObject>();
-		TransformObject->SetArrayField(TEXT("location"), TArray<TSharedPtr<FJsonValue>>
-		{
-			MakeShared<FJsonValueNumber>(Location.X),
-			MakeShared<FJsonValueNumber>(Location.Y),
-			MakeShared<FJsonValueNumber>(Location.Z)
-		});
-		TransformObject->SetArrayField(TEXT("rotation"), TArray<TSharedPtr<FJsonValue>>
-		{
-			MakeShared<FJsonValueNumber>(Rotation.Roll),
-			MakeShared<FJsonValueNumber>(Rotation.Pitch),
-			MakeShared<FJsonValueNumber>(Rotation.Yaw)
-		});
-		TransformObject->SetArrayField(TEXT("scale"), TArray<TSharedPtr<FJsonValue>>
-		{
-			MakeShared<FJsonValueNumber>(Scale.X),
-			MakeShared<FJsonValueNumber>(Scale.Y),
-			MakeShared<FJsonValueNumber>(Scale.Z)
-		});
-		return TransformObject;
-	}
-
 	TSharedPtr<FJsonObject> MakeJointTemplateObject(const FCadChildJointDef& Joint)
 	{
 		TSharedPtr<FJsonObject> JointObject = MakeShared<FJsonObject>();
@@ -454,7 +154,7 @@ namespace
 	{
 		TSharedPtr<FJsonObject> VisualObject = MakeShared<FJsonObject>();
 		VisualObject->SetStringField(TEXT("mesh_path"), Visual.MeshPath);
-		VisualObject->SetObjectField(TEXT("relative_transform"), MakeMasterChildExtractorTransformObject(Visual.RelativeTransform));
+		VisualObject->SetObjectField(TEXT("relative_transform"), CadJsonTransformUtils::MakeTransformObject(Visual.RelativeTransform));
 		VisualObject->SetStringField(TEXT("material_path"), Visual.MaterialPath);
 		VisualObject->SetStringField(TEXT("material_name"), Visual.MaterialName);
 		return VisualObject;
@@ -464,7 +164,7 @@ namespace
 	{
 		TSharedPtr<FJsonObject> LinkObject = MakeShared<FJsonObject>();
 		LinkObject->SetStringField(TEXT("link_name"), LinkTemplate.LinkName);
-		LinkObject->SetObjectField(TEXT("relative_transform"), MakeMasterChildExtractorTransformObject(LinkTemplate.RelativeTransform));
+		LinkObject->SetObjectField(TEXT("relative_transform"), CadJsonTransformUtils::MakeTransformObject(LinkTemplate.RelativeTransform));
 
 		TArray<TSharedPtr<FJsonValue>> VisualValues;
 		for (const FCadChildVisual& Visual : LinkTemplate.Visuals)
@@ -497,7 +197,7 @@ namespace
 			}
 			else
 			{
-				CollectChildVisualsForStaticType(ChildRootActor, ChildDocument);
+				CadChildVisualCollector::CollectStaticChildVisuals(ChildRootActor, ChildDocument.Visuals);
 			}
 		}
 		else
@@ -526,7 +226,7 @@ namespace
 		RootObject->SetStringField(TEXT("child_actor_name"), ChildDocument.ChildActorName);
 		RootObject->SetStringField(TEXT("source_actor_path"), ChildDocument.SourceActorPath);
 		RootObject->SetStringField(TEXT("actor_type"), MasterChildTypeToString(ChildDocument.ActorType));
-		RootObject->SetObjectField(TEXT("relative_transform"), MakeMasterChildExtractorTransformObject(ChildDocument.RelativeTransform));
+		RootObject->SetObjectField(TEXT("relative_transform"), CadJsonTransformUtils::MakeTransformObject(ChildDocument.RelativeTransform));
 
 		TSharedPtr<FJsonObject> PhysicsObject = MakeShared<FJsonObject>();
 		PhysicsObject->SetNumberField(TEXT("mass"), ChildDocument.Physics.Mass);
@@ -646,7 +346,7 @@ namespace CadChildJsonService
 		if (RootObject->TryGetObjectField(TEXT("master_world_transform"), MasterTransformObject) &&
 			MasterTransformObject && MasterTransformObject->IsValid())
 		{
-			if (!TryParseTransformObject(*MasterTransformObject, OutDocument.MasterWorldTransform, OutError))
+			if (!CadJsonTransformUtils::ParseTransformObject(*MasterTransformObject, OutDocument.MasterWorldTransform, OutError))
 			{
 				OutError = FString::Printf(TEXT("Failed to parse 'master_world_transform': %s"), *OutError);
 				return false;
@@ -703,7 +403,7 @@ namespace CadChildJsonService
 				OutError = FString::Printf(TEXT("Child '%s' is missing 'relative_transform'."), *ChildEntry.ActorName);
 				return false;
 			}
-			if (!TryParseTransformObject(*ChildTransformObject, ChildEntry.RelativeTransform, OutError))
+			if (!CadJsonTransformUtils::ParseTransformObject(*ChildTransformObject, ChildEntry.RelativeTransform, OutError))
 			{
 				OutError = FString::Printf(TEXT("Child '%s' transform parse failed: %s"), *ChildEntry.ActorName, *OutError);
 				return false;
@@ -759,7 +459,7 @@ namespace CadChildJsonService
 		TArray<FString> GeneratedChildJsonPaths;
 		for (const FCadChildEntry& ChildEntry : MasterDocument.Children)
 		{
-			AActor* ChildRootActor = ResolveActorByPath(ChildEntry.ActorPath);
+			AActor* ChildRootActor = CadActorHierarchyUtils::FindByPath(ChildEntry.ActorPath);
 			FCadChildDoc ChildDocument = BuildChildDocumentTemplate(MasterDocument, ChildEntry, ChildRootActor);
 
 			FString ChildFileName = ChildEntry.ChildJsonFileName.TrimStartAndEnd();

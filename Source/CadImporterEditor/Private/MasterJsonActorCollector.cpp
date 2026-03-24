@@ -1,6 +1,7 @@
 #include "MasterJsonActorCollector.h"
 
 #include "CadImporterEditor.h"
+#include "Editor/ActorHierarchyUtils.h"
 #include "Editor.h"
 #include "Engine/Selection.h"
 #include "Misc/Paths.h"
@@ -10,21 +11,6 @@ namespace
 	FString GetMasterWorkflowActorDisplayName(const AActor* Actor)
 	{
 		return Actor ? Actor->GetActorNameOrLabel() : TEXT("(none)");
-	}
-
-	void GetSortedDirectChildren(AActor* ParentActor, TArray<AActor*>& OutChildren)
-	{
-		OutChildren.Reset();
-		if (!ParentActor)
-		{
-			return;
-		}
-
-		ParentActor->GetAttachedActors(OutChildren, false, false);
-		OutChildren.Sort([](const AActor& Left, const AActor& Right)
-		{
-			return Left.GetActorNameOrLabel() < Right.GetActorNameOrLabel();
-		});
 	}
 
 	void AddViolation(
@@ -210,7 +196,7 @@ namespace CadMasterSelection
 		OutResult.MasterActor = MasterActor;
 
 		TArray<AActor*> Children;
-		GetSortedDirectChildren(MasterActor, Children);
+		CadActorHierarchyUtils::GetSortedAttachedChildren(MasterActor, Children, false);
 
 		for (AActor* ChildActor : Children)
 		{
