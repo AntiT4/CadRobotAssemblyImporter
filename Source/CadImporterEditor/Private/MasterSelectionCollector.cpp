@@ -136,7 +136,7 @@ namespace
 	}
 }
 
-namespace CadMasterSelection
+namespace CadMasterSelectionCollector
 {
 	bool TryCollectFromSelection(FCadMasterSelection& OutResult, FString& OutError)
 	{

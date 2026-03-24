@@ -33,7 +33,7 @@ struct FCadMasterSelection
 	}
 };
 
-namespace CadMasterSelection
+namespace CadMasterSelectionCollector
 {
 	bool TryCollectFromSelection(FCadMasterSelection& OutResult, FString& OutError);
 	bool TryCollectFromMasterActor(AActor* MasterActor, FCadMasterSelection& OutResult, FString& OutError);

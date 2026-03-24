@@ -89,7 +89,7 @@ namespace
 	}
 }
 
-namespace CadWorkspaceService
+namespace CadWorkspacePrep
 {
 	bool TryPrepareWorkspace(
 		const FString& WorkspaceFolderInput,

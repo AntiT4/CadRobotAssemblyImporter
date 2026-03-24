@@ -734,7 +734,7 @@ FReply SCadWorkflowWizard::ConfirmMaster()
 
 	FString Error;
 	FCadMasterSelection SelectionResult;
-	if (!CadMasterSelection::TryCollectFromSelection(SelectionResult, Error))
+	if (!CadMasterSelectionCollector::TryCollectFromSelection(SelectionResult, Error))
 	{
 		SetStatus(FString::Printf(TEXT("Master actor confirmation failed:\n%s"), *Error));
 		return FReply::Handled();
@@ -790,7 +790,7 @@ FReply SCadWorkflowWizard::GenerateWorkflowJson()
 	SelectionForGeneration.Children = ChildEntries;
 
 	FString Error;
-	if (!CadMasterJsonGenerator::TryGenerateAndWriteFromSelectionResult(SelectionForGeneration, WorkspaceFolder, MasterJsonResult, Error))
+	if (!CadMasterDocExporter::TryGenerateAndWriteFromSelectionResult(SelectionForGeneration, WorkspaceFolder, MasterJsonResult, Error))
 	{
 		SetStatus(FString::Printf(TEXT("Generate JSON failed:\n%s"), *Error));
 		return FReply::Handled();
@@ -803,7 +803,7 @@ FReply SCadWorkflowWizard::GenerateWorkflowJson()
 		return FReply::Handled();
 	}
 
-	if (!CadChildJsonService::TryExtractChildJsonFilesFromDocument(
+	if (!CadChildDocExporter::TryExtractChildJsonFilesFromDocument(
 		MasterJsonPath,
 		MasterJsonResult.Document,
 		ChildJsonResult,

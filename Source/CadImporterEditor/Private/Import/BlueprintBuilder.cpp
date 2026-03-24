@@ -791,7 +791,7 @@ bool FCadBlueprintBuilder::BuildComponents(
 				continue;
 			}
 
-			const FString MeshObjectPath = CadImportAssetImporterUtils::PackagePathToObjectPath(MeshPath);
+			const FString MeshObjectPath = CadAssetImportUtils::PackagePathToObjectPath(MeshPath);
 			UStaticMesh* StaticMesh = LoadObject<UStaticMesh>(nullptr, *MeshObjectPath);
 			if (!StaticMesh)
 			{
@@ -847,7 +847,7 @@ bool FCadBlueprintBuilder::BuildComponents(
 
 				if (VisualDefinition && !VisualDefinition->MaterialPath.IsEmpty())
 				{
-					const FString MaterialObjectPath = CadImportAssetImporterUtils::PackagePathToObjectPath(VisualDefinition->MaterialPath);
+					const FString MaterialObjectPath = CadAssetImportUtils::PackagePathToObjectPath(VisualDefinition->MaterialPath);
 					if (UMaterialInterface* Material = LoadObject<UMaterialInterface>(nullptr, *MaterialObjectPath))
 					{
 						const int32 MaterialSlotCount = FMath::Max(StaticMesh->GetStaticMaterials().Num(), 1);

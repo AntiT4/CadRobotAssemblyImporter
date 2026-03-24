@@ -3,7 +3,7 @@
 #include "CoreMinimal.h"
 #include "WorkflowTypes.h"
 
-namespace CadMasterWorkflowImportParser
+namespace CadChildDocParser
 {
 	bool TryLoadChildDocumentFromJsonPath(
 		const FString& ChildJsonPath,

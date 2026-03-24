@@ -289,7 +289,7 @@ namespace CadImportDialogUtils
 		ImportedAssets.Reserve(UniqueImportedPaths.Num());
 		for (const FString& PackagePath : UniqueImportedPaths)
 		{
-			const FString ObjectPath = CadImportAssetImporterUtils::PackagePathToObjectPath(PackagePath);
+			const FString ObjectPath = CadAssetImportUtils::PackagePathToObjectPath(PackagePath);
 			if (UObject* ImportedAsset = LoadObject<UObject>(nullptr, *ObjectPath))
 			{
 				ImportedAssets.Add(ImportedAsset);

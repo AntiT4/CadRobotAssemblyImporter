@@ -306,7 +306,7 @@ namespace
 	}
 }
 
-namespace CadChildJsonService
+namespace CadChildDocExporter
 {
 	bool TryParseMasterDocument(
 		const FString& MasterJsonPath,

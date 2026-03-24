@@ -154,7 +154,7 @@ namespace
 		const FString MasterNameInput = ResolveMasterNameInput(MasterActor);
 
 		FCadWorkspacePaths WorkspacePaths;
-		if (!CadWorkspaceService::TryPrepareWorkspace(WorkspaceFolderInput, MasterNameInput, WorkspacePaths, OutError))
+		if (!CadWorkspacePrep::TryPrepareWorkspace(WorkspaceFolderInput, MasterNameInput, WorkspacePaths, OutError))
 		{
 			return false;
 		}
@@ -165,7 +165,7 @@ namespace
 			return false;
 		}
 
-		if (!CadMasterJsonGenerator::TryWriteDocument(Document, WorkspacePaths.MasterJsonPath, OutError))
+		if (!CadMasterDocExporter::TryWriteDocument(Document, WorkspacePaths.MasterJsonPath, OutError))
 		{
 			return false;
 		}
@@ -178,7 +178,7 @@ namespace
 	}
 }
 
-namespace CadMasterJsonGenerator
+namespace CadMasterDocExporter
 {
 	bool TryGenerateAndWriteFromSelectionResult(
 		const FCadMasterSelection& SelectionResult,
@@ -208,7 +208,7 @@ namespace CadMasterJsonGenerator
 		FString& OutError)
 	{
 		FCadMasterSelection SelectionResult;
-		if (!CadMasterSelection::TryCollectFromSelection(SelectionResult, OutError))
+		if (!CadMasterSelectionCollector::TryCollectFromSelection(SelectionResult, OutError))
 		{
 			return false;
 		}
@@ -228,7 +228,7 @@ namespace CadMasterJsonGenerator
 		}
 
 		FCadMasterSelection SelectionResult;
-		if (!CadMasterSelection::TryCollectFromMasterActor(MasterActor, SelectionResult, OutError))
+		if (!CadMasterSelectionCollector::TryCollectFromMasterActor(MasterActor, SelectionResult, OutError))
 		{
 			return false;
 		}

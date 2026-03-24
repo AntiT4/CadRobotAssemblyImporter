@@ -13,7 +13,7 @@ struct FCadMasterJsonGenerationResult
 	FCadWorkflowBuildInput BuildInput;
 };
 
-namespace CadMasterJsonGenerator
+namespace CadMasterDocExporter
 {
 	bool TryGenerateAndWriteFromSelectionResult(
 		const FCadMasterSelection& SelectionResult,

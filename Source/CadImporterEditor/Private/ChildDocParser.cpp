@@ -67,7 +67,7 @@ namespace
 	}
 }
 
-namespace CadMasterWorkflowImportParser
+namespace CadChildDocParser
 {
 	bool TryLoadChildDocumentFromJsonPath(
 		const FString& ChildJsonPath,

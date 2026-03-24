@@ -214,9 +214,9 @@ bool FCadMeshImporter::ImportMeshForLink(
 			return false;
 		}
 
-		if (!CadImportAssetImporterUtils::IsFbxMeshSourcePath(Visual.MeshPath))
+		if (!CadAssetImportUtils::IsFbxMeshSourcePath(Visual.MeshPath))
 		{
-			const FString StaticMeshPackagePath = CadImportAssetImporterUtils::NormalizeExistingAssetPackagePath(Visual.MeshPath);
+			const FString StaticMeshPackagePath = CadAssetImportUtils::NormalizeExistingAssetPackagePath(Visual.MeshPath);
 			const FString MeshSourceKey = StaticMeshPackagePath.ToLower();
 			if (const FString* ExistingImportedPath = InOutImportedMeshBySource.Find(MeshSourceKey))
 			{
@@ -226,7 +226,7 @@ bool FCadMeshImporter::ImportMeshForLink(
 				continue;
 			}
 
-			const FString StaticMeshObjectPath = CadImportAssetImporterUtils::PackagePathToObjectPath(StaticMeshPackagePath);
+			const FString StaticMeshObjectPath = CadAssetImportUtils::PackagePathToObjectPath(StaticMeshPackagePath);
 			UStaticMesh* ExistingMesh = LoadObject<UStaticMesh>(nullptr, *StaticMeshObjectPath);
 			if (!ExistingMesh)
 			{
@@ -256,7 +256,7 @@ bool FCadMeshImporter::ImportMeshForLink(
 			continue;
 		}
 
-		const FString AbsolutePath = CadImportAssetImporterUtils::ResolveMeshAbsolutePath(Model, Visual.MeshPath);
+		const FString AbsolutePath = CadAssetImportUtils::ResolveMeshAbsolutePath(Model, Visual.MeshPath);
 		if (!FPaths::FileExists(AbsolutePath))
 		{
 			OutError = FString::Printf(TEXT("FBX not found: %s"), *AbsolutePath);
@@ -303,14 +303,14 @@ bool FCadMeshImporter::ImportMeshForLink(
 		Tasks.Add(ImportTask);
 		AssetToolsModule.Get().ImportAssetTasks(Tasks);
 
-		const FString ImportedMeshPath = CadImportAssetImporterUtils::GetFirstImportedStaticMeshPath(ImportTask);
+		const FString ImportedMeshPath = CadAssetImportUtils::GetFirstImportedStaticMeshPath(ImportTask);
 		if (ImportedMeshPath.IsEmpty())
 		{
 			OutError = FString::Printf(TEXT("FBX import did not produce a static mesh: %s"), *AbsolutePath);
 			return false;
 		}
 
-		const FString ImportedMeshObjectPath = CadImportAssetImporterUtils::PackagePathToObjectPath(ImportedMeshPath);
+		const FString ImportedMeshObjectPath = CadAssetImportUtils::PackagePathToObjectPath(ImportedMeshPath);
 		UStaticMesh* ImportedMesh = LoadObject<UStaticMesh>(nullptr, *ImportedMeshObjectPath);
 		if (!ImportedMesh)
 		{

@@ -108,7 +108,7 @@ bool FCadImportService::BuildFromWorkflow(const FCadWorkflowBuildInput& BuildInp
 	}
 
 	FCadMasterDoc MasterDocument;
-	if (!CadChildJsonService::TryParseMasterDocument(MasterJsonPath, MasterDocument, Error))
+	if (!CadChildDocExporter::TryParseMasterDocument(MasterJsonPath, MasterDocument, Error))
 	{
 		return ReportFailure(TEXT("Master workflow parse failed"), TEXT("Master workflow parse failed"), Error);
 	}
@@ -143,7 +143,7 @@ bool FCadImportService::BuildFromWorkflow(const FCadWorkflowBuildInput& BuildInp
 
 		const FString ChildJsonPath = FPaths::ConvertRelativePathToFull(FPaths::Combine(ResolvedBuildInput.ChildJsonFolderPath, ChildJsonFileName));
 		FCadChildDoc ChildDocument;
-		if (!CadMasterWorkflowImportParser::TryLoadChildDocumentFromJsonPath(ChildJsonPath, ChildDocument, Error))
+		if (!CadChildDocParser::TryLoadChildDocumentFromJsonPath(ChildJsonPath, ChildDocument, Error))
 		{
 			return ReportFailure(
 				TEXT("Failed to load child json"),

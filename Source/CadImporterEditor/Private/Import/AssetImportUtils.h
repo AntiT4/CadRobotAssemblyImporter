@@ -5,7 +5,7 @@
 
 class UAssetImportTask;
 
-namespace CadImportAssetImporterUtils
+namespace CadAssetImportUtils
 {
 	FString NormalizeMeshSourcePath(const FString& RawMeshPath);
 	bool IsFbxMeshSourcePath(const FString& RawMeshPath);

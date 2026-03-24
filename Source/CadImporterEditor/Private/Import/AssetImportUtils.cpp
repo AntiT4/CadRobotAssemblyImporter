@@ -5,7 +5,7 @@
 #include "Misc/Paths.h"
 #include "Misc/PackageName.h"
 
-namespace CadImportAssetImporterUtils
+namespace CadAssetImportUtils
 {
 	FString NormalizeMeshSourcePath(const FString& RawMeshPath)
 	{

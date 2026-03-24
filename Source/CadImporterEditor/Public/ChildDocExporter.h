@@ -12,7 +12,7 @@ struct FCadChildJsonResult
 	TArray<FString> GeneratedChildJsonPaths;
 };
 
-namespace CadChildJsonService
+namespace CadChildDocExporter
 {
 	bool TryParseMasterDocument(
 		const FString& MasterJsonPath,
