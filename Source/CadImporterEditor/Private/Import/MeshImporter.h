@@ -1,7 +1,8 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "ImportTypes.h"
+#include "ImportModelTypes.h"
+#include "ImportOptions.h"
 
 class UFbxImportUI;
 class UStaticMesh;

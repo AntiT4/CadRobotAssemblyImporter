@@ -1,14 +1,12 @@
 #include "MasterWorkflowImportParser.h"
 
-#include "MasterChildJsonExtractor.h"
 #include "Dom/JsonObject.h"
 #include "Misc/FileHelper.h"
-#include "Misc/Paths.h"
 #include "Serialization/JsonSerializer.h"
 
 namespace
 {
-	bool ParseMasterWorkflowTransformArray3(
+	bool ParseTransformArray3(
 		const TSharedPtr<FJsonObject>& Object,
 		const TCHAR* FieldName,
 		TArray<double>& OutValues,
@@ -42,7 +40,7 @@ namespace
 		return true;
 	}
 
-	bool ParseMasterWorkflowTransformObject(const TSharedPtr<FJsonObject>& TransformObject, FTransform& OutTransform, FString& OutError)
+	bool ParseTransformObject(const TSharedPtr<FJsonObject>& TransformObject, FTransform& OutTransform, FString& OutError)
 	{
 		if (!TransformObject.IsValid())
 		{
@@ -53,9 +51,9 @@ namespace
 		TArray<double> LocationValues;
 		TArray<double> RotationValues;
 		TArray<double> ScaleValues;
-		if (!ParseMasterWorkflowTransformArray3(TransformObject, TEXT("location"), LocationValues, OutError) ||
-			!ParseMasterWorkflowTransformArray3(TransformObject, TEXT("rotation"), RotationValues, OutError) ||
-			!ParseMasterWorkflowTransformArray3(TransformObject, TEXT("scale"), ScaleValues, OutError))
+		if (!ParseTransformArray3(TransformObject, TEXT("location"), LocationValues, OutError) ||
+			!ParseTransformArray3(TransformObject, TEXT("rotation"), RotationValues, OutError) ||
+			!ParseTransformArray3(TransformObject, TEXT("scale"), ScaleValues, OutError))
 		{
 			return false;
 		}
@@ -67,7 +65,7 @@ namespace
 		return true;
 	}
 
-	bool ParseMasterWorkflowVectorArray3(
+	bool ParseVectorArray3(
 		const TSharedPtr<FJsonObject>& Object,
 		const TCHAR* FieldName,
 		FVector& OutVector,
@@ -101,7 +99,7 @@ namespace
 		return true;
 	}
 
-	bool ParseMasterWorkflowChildActorType(const FString& RawType, ECadMasterChildActorType& OutType, FString& OutError)
+	bool ParseChildActorType(const FString& RawType, ECadMasterChildActorType& OutType, FString& OutError)
 	{
 		if (RawType.TrimStartAndEnd().IsEmpty())
 		{
@@ -124,7 +122,7 @@ namespace
 		return false;
 	}
 
-	bool ParseMasterWorkflowJointType(const FString& RawType, ECadImportJointType& OutType, FString& OutError)
+	bool ParseJointType(const FString& RawType, ECadImportJointType& OutType, FString& OutError)
 	{
 		if (RawType.Equals(TEXT("fixed"), ESearchCase::IgnoreCase))
 		{
@@ -146,9 +144,27 @@ namespace
 		return false;
 	}
 
-	FString ResolveMasterWorkflowRootLinkName(const FCadChildJsonDocument& ChildDocument);
+	FString ResolveRootLinkName(const FCadChildJsonDocument& ChildDocument)
+	{
+		for (const FCadChildLinkTemplate& LinkTemplate : ChildDocument.Links)
+		{
+			const FString LinkName = LinkTemplate.LinkName.TrimStartAndEnd();
+			if (!LinkName.IsEmpty())
+			{
+				return LinkName;
+			}
+		}
 
-	bool TryLoadChildDocumentFromJsonPathInternal(const FString& ChildJsonPath, FCadChildJsonDocument& OutDocument, FString& OutError)
+		return ChildDocument.ChildActorName;
+	}
+}
+
+namespace CadMasterWorkflowImportParser
+{
+	bool TryLoadChildDocumentFromJsonPath(
+		const FString& ChildJsonPath,
+		FCadChildJsonDocument& OutDocument,
+		FString& OutError)
 	{
 		OutDocument = FCadChildJsonDocument();
 		OutError.Reset();
@@ -179,7 +195,7 @@ namespace
 		FString RawActorType;
 		if (RootObject->TryGetStringField(TEXT("actor_type"), RawActorType))
 		{
-			if (!ParseMasterWorkflowChildActorType(RawActorType, OutDocument.ActorType, OutError))
+			if (!ParseChildActorType(RawActorType, OutDocument.ActorType, OutError))
 			{
 				OutError = FString::Printf(TEXT("Child '%s' parse failed: %s"), *OutDocument.ChildActorName, *OutError);
 				return false;
@@ -194,7 +210,7 @@ namespace
 			OutError = FString::Printf(TEXT("Child '%s' is missing 'relative_transform'."), *OutDocument.ChildActorName);
 			return false;
 		}
-		if (!ParseMasterWorkflowTransformObject(*RelativeTransformObject, OutDocument.RelativeTransform, OutError))
+		if (!ParseTransformObject(*RelativeTransformObject, OutDocument.RelativeTransform, OutError))
 		{
 			OutError = FString::Printf(TEXT("Child '%s' transform parse failed: %s"), *OutDocument.ChildActorName, *OutError);
 			return false;
@@ -231,7 +247,7 @@ namespace
 					VisualTransformObject &&
 					VisualTransformObject->IsValid())
 				{
-					if (!ParseMasterWorkflowTransformObject(*VisualTransformObject, VisualEntry.RelativeTransform, OutError))
+					if (!ParseTransformObject(*VisualTransformObject, VisualEntry.RelativeTransform, OutError))
 					{
 						OutError = FString::Printf(TEXT("Child '%s' visual[%d] transform parse failed: %s"), *OutDocument.ChildActorName, VisualIndex, *OutError);
 						return false;
@@ -268,7 +284,7 @@ namespace
 					LinkTransformObject &&
 					LinkTransformObject->IsValid())
 				{
-					if (!ParseMasterWorkflowTransformObject(*LinkTransformObject, LinkTemplate.RelativeTransform, OutError))
+					if (!ParseTransformObject(*LinkTransformObject, LinkTemplate.RelativeTransform, OutError))
 					{
 						OutError = FString::Printf(TEXT("Child '%s' link[%d] transform parse failed: %s"), *OutDocument.ChildActorName, LinkIndex, *OutError);
 						return false;
@@ -303,7 +319,7 @@ namespace
 							VisualTransformObject &&
 							VisualTransformObject->IsValid())
 						{
-							if (!ParseMasterWorkflowTransformObject(*VisualTransformObject, VisualEntry.RelativeTransform, OutError))
+							if (!ParseTransformObject(*VisualTransformObject, VisualEntry.RelativeTransform, OutError))
 							{
 								OutError = FString::Printf(
 									TEXT("Child '%s' link[%d] visual[%d] transform parse failed: %s"),
@@ -349,7 +365,7 @@ namespace
 				FString JointTypeString;
 				if (JointObject->TryGetStringField(TEXT("joint_type"), JointTypeString))
 				{
-					if (!ParseMasterWorkflowJointType(JointTypeString, JointTemplate.JointType, OutError))
+					if (!ParseJointType(JointTypeString, JointTemplate.JointType, OutError))
 					{
 						OutError = FString::Printf(TEXT("Child '%s' joint[%d] parse failed: %s"), *OutDocument.ChildActorName, JointIndex, *OutError);
 						return false;
@@ -358,7 +374,7 @@ namespace
 
 				FVector Axis = FVector::UpVector;
 				FString AxisParseError;
-				if (JointObject->HasField(TEXT("axis")) && !ParseMasterWorkflowVectorArray3(JointObject, TEXT("axis"), Axis, AxisParseError))
+				if (JointObject->HasField(TEXT("axis")) && !ParseVectorArray3(JointObject, TEXT("axis"), Axis, AxisParseError))
 				{
 					OutError = FString::Printf(TEXT("Child '%s' joint[%d] axis parse failed: %s"), *OutDocument.ChildActorName, JointIndex, *AxisParseError);
 					return false;
@@ -377,7 +393,7 @@ namespace
 
 				if (JointTemplate.JointName.TrimStartAndEnd().IsEmpty())
 				{
-					const FString RootLinkName = ResolveMasterWorkflowRootLinkName(OutDocument);
+					const FString RootLinkName = ResolveRootLinkName(OutDocument);
 					const FString ParentName = JointTemplate.ParentActorName.TrimStartAndEnd().IsEmpty()
 						? TEXT("master")
 						: JointTemplate.ParentActorName;
@@ -391,331 +407,6 @@ namespace
 			}
 		}
 
-		return true;
-	}
-
-	FString ResolveWorkspaceFolderForBuildInput(const FCadMasterWorkflowBuildInput& BuildInput, const FCadMasterJsonDocument& MasterDocument, const FString& MasterJsonPath)
-	{
-		const FString InputWorkspace = BuildInput.WorkspaceFolder.TrimStartAndEnd();
-		if (!InputWorkspace.IsEmpty())
-		{
-			return FPaths::ConvertRelativePathToFull(InputWorkspace);
-		}
-
-		const FString DocumentWorkspace = MasterDocument.WorkspaceFolder.TrimStartAndEnd();
-		if (!DocumentWorkspace.IsEmpty())
-		{
-			return FPaths::ConvertRelativePathToFull(DocumentWorkspace);
-		}
-
-		return FPaths::ConvertRelativePathToFull(FPaths::GetPath(MasterJsonPath));
-	}
-
-	FString ResolveChildFolderForBuildInput(const FCadMasterWorkflowBuildInput& BuildInput, const FCadMasterJsonDocument& MasterDocument, const FString& WorkspaceFolder)
-	{
-		const FString ExplicitChildFolder = BuildInput.ChildJsonFolderPath.TrimStartAndEnd();
-		if (!ExplicitChildFolder.IsEmpty())
-		{
-			return FPaths::ConvertRelativePathToFull(ExplicitChildFolder);
-		}
-
-		const FString ChildFolderName = MasterDocument.ChildJsonFolderName.TrimStartAndEnd();
-		return FPaths::ConvertRelativePathToFull(FPaths::Combine(WorkspaceFolder, ChildFolderName));
-	}
-
-	void FillModelUnitsDefaults(FCadImportModel& InOutModel)
-	{
-		InOutModel.Units.Length = TEXT("centimeter");
-		InOutModel.Units.Angle = TEXT("degree");
-		InOutModel.Units.UpAxis = TEXT("z");
-		InOutModel.Units.FrontAxis = TEXT("x");
-		InOutModel.Units.Handedness = TEXT("left");
-		InOutModel.Units.EulerOrder = TEXT("xyz");
-		InOutModel.Units.MeshScale = 1.0f;
-	}
-
-	bool EnsureMasterWorkflowLinkExists(const TMap<FString, FCadImportLink>& LinksByName, const FString& LinkName)
-	{
-		return !LinkName.TrimStartAndEnd().IsEmpty() && LinksByName.Contains(LinkName);
-	}
-
-	FString ResolveMasterWorkflowRootLinkName(const FCadChildJsonDocument& ChildDocument)
-	{
-		for (const FCadChildLinkTemplate& LinkTemplate : ChildDocument.Links)
-		{
-			const FString LinkName = LinkTemplate.LinkName.TrimStartAndEnd();
-			if (!LinkName.IsEmpty())
-			{
-				return LinkName;
-			}
-		}
-
-		return ChildDocument.ChildActorName;
-	}
-
-	void AppendMasterWorkflowVisualsToImportLink(
-		const TArray<FCadChildVisualEntry>& ChildVisuals,
-		FCadImportLink& OutLink)
-	{
-		for (const FCadChildVisualEntry& ChildVisual : ChildVisuals)
-		{
-			FCadImportVisual Visual;
-			Visual.MeshPath = ChildVisual.MeshPath;
-			Visual.Transform = ChildVisual.RelativeTransform;
-			Visual.MaterialPath = ChildVisual.MaterialPath;
-			Visual.MaterialName = ChildVisual.MaterialName;
-			OutLink.Visuals.Add(MoveTemp(Visual));
-		}
-	}
-
-	bool HasMasterWorkflowRootAnchorJoint(
-		const FCadChildJsonDocument& ChildDocument,
-		const FString& MasterRootLinkName,
-		const FString& ChildRootLinkName)
-	{
-		for (const FCadChildJointTemplate& JointTemplate : ChildDocument.Joints)
-		{
-			const FString ParentName = JointTemplate.ParentActorName.TrimStartAndEnd().IsEmpty()
-				? MasterRootLinkName
-				: JointTemplate.ParentActorName;
-			const FString ChildName = JointTemplate.ChildActorName.TrimStartAndEnd().IsEmpty()
-				? ChildRootLinkName
-				: JointTemplate.ChildActorName;
-			if (ParentName == MasterRootLinkName && ChildName == ChildRootLinkName)
-			{
-				return true;
-			}
-		}
-
-		return false;
-	}
-}
-
-namespace CadMasterWorkflowImportParser
-{
-	bool TryLoadChildDocumentFromJsonPath(const FString& ChildJsonPath, FCadChildJsonDocument& OutDocument, FString& OutError)
-	{
-		return TryLoadChildDocumentFromJsonPathInternal(ChildJsonPath, OutDocument, OutError);
-	}
-
-	bool TryBuildImportModel(
-		const FCadMasterWorkflowBuildInput& BuildInput,
-		FCadMasterWorkflowImportParseResult& OutResult,
-		FString& OutError)
-	{
-		OutResult = FCadMasterWorkflowImportParseResult();
-		OutError.Reset();
-
-		const FString MasterJsonPath = BuildInput.MasterJsonPath.TrimStartAndEnd();
-		if (MasterJsonPath.IsEmpty())
-		{
-			OutError = TEXT("Master workflow build input is missing MasterJsonPath.");
-			return false;
-		}
-
-		FCadMasterJsonDocument MasterDocument;
-		if (!CadMasterChildJsonExtractor::TryParseMasterDocument(MasterJsonPath, MasterDocument, OutError))
-		{
-			return false;
-		}
-
-		const FString WorkspaceFolder = ResolveWorkspaceFolderForBuildInput(BuildInput, MasterDocument, MasterJsonPath);
-		const FString ChildJsonFolderPath = ResolveChildFolderForBuildInput(BuildInput, MasterDocument, WorkspaceFolder);
-
-		TArray<FCadChildJsonDocument> ChildDocuments;
-		ChildDocuments.Reserve(MasterDocument.Children.Num());
-		for (const FCadMasterChildEntry& ChildEntry : MasterDocument.Children)
-		{
-			const FString ChildFileName = ChildEntry.ChildJsonFileName.TrimStartAndEnd();
-			if (ChildFileName.IsEmpty())
-			{
-				OutError = FString::Printf(TEXT("Master child '%s' is missing child_json_file_name."), *ChildEntry.ActorName);
-				return false;
-			}
-
-			const FString ChildJsonPath = FPaths::ConvertRelativePathToFull(FPaths::Combine(ChildJsonFolderPath, ChildFileName));
-			FCadChildJsonDocument ChildDocument;
-			if (!TryLoadChildDocumentFromJsonPathInternal(ChildJsonPath, ChildDocument, OutError))
-			{
-				OutError = FString::Printf(TEXT("Failed to load child json for '%s': %s"), *ChildEntry.ActorName, *OutError);
-				return false;
-			}
-
-			if (ChildDocument.ChildActorName.TrimStartAndEnd().IsEmpty())
-			{
-				ChildDocument.ChildActorName = ChildEntry.ActorName;
-			}
-
-			ChildDocuments.Add(MoveTemp(ChildDocument));
-		}
-
-		FCadImportModel Model;
-		Model.RobotName = MasterDocument.MasterName;
-		Model.RootLinkName = MasterDocument.MasterName;
-		Model.SourceDirectory = ChildJsonFolderPath;
-		Model.RootPlacement.bHasWorldTransform = true;
-		Model.RootPlacement.WorldTransform = MasterDocument.MasterWorldTransform;
-		FillModelUnitsDefaults(Model);
-
-		FCadImportLink RootLink;
-		RootLink.Name = Model.RootLinkName;
-		RootLink.Transform = MasterDocument.MasterWorldTransform;
-		RootLink.Physics.Mass = 0.0f;
-		RootLink.Physics.bSimulatePhysics = false;
-		Model.Links.Add(RootLink);
-
-		bool bHasMovableChild = false;
-		for (const FCadChildJsonDocument& ChildDocument : ChildDocuments)
-		{
-			bHasMovableChild = bHasMovableChild || (ChildDocument.ActorType == ECadMasterChildActorType::Movable);
-
-			if (ChildDocument.Links.Num() > 0)
-			{
-				for (const FCadChildLinkTemplate& LinkTemplate : ChildDocument.Links)
-				{
-					const FString LinkName = LinkTemplate.LinkName.TrimStartAndEnd();
-					if (LinkName.IsEmpty())
-					{
-						OutError = FString::Printf(TEXT("Child '%s' has a link with empty link_name."), *ChildDocument.ChildActorName);
-						return false;
-					}
-
-					FCadImportLink ChildLink;
-					ChildLink.Name = LinkName;
-					ChildLink.Transform = LinkTemplate.RelativeTransform;
-					ChildLink.Physics = ChildDocument.Physics;
-					AppendMasterWorkflowVisualsToImportLink(LinkTemplate.Visuals, ChildLink);
-					Model.Links.Add(MoveTemp(ChildLink));
-				}
-			}
-			else
-			{
-				FCadImportLink ChildLink;
-				ChildLink.Name = ChildDocument.ChildActorName;
-				ChildLink.Transform = ChildDocument.RelativeTransform;
-				ChildLink.Physics = ChildDocument.Physics;
-				AppendMasterWorkflowVisualsToImportLink(ChildDocument.Visuals, ChildLink);
-				Model.Links.Add(MoveTemp(ChildLink));
-			}
-		}
-		Model.Profile = bHasMovableChild ? ECadImportModelProfile::DynamicRobot : ECadImportModelProfile::FixedAssembly;
-
-		TMap<FString, FCadImportLink> LinksByName;
-		for (const FCadImportLink& Link : Model.Links)
-		{
-			if (Link.Name.TrimStartAndEnd().IsEmpty())
-			{
-				OutError = TEXT("Merged link contains an empty name.");
-				return false;
-			}
-			if (LinksByName.Contains(Link.Name))
-			{
-				OutError = FString::Printf(TEXT("Duplicate link name '%s' was found while merging child json files."), *Link.Name);
-				return false;
-			}
-
-			LinksByName.Add(Link.Name, Link);
-		}
-
-		for (const FCadChildJsonDocument& ChildDocument : ChildDocuments)
-		{
-			const FString DefaultParentName = Model.RootLinkName;
-			const FString DefaultChildName = ResolveMasterWorkflowRootLinkName(ChildDocument);
-			if (!EnsureMasterWorkflowLinkExists(LinksByName, DefaultChildName))
-			{
-				OutError = FString::Printf(TEXT("Child '%s' root link '%s' was not found in merged links."),
-					*ChildDocument.ChildActorName,
-					*DefaultChildName);
-				return false;
-			}
-
-			if (!HasMasterWorkflowRootAnchorJoint(ChildDocument, DefaultParentName, DefaultChildName))
-			{
-				FCadImportJoint AnchorJoint;
-				AnchorJoint.Name = FString::Printf(TEXT("%s_to_%s"), *DefaultParentName, *DefaultChildName);
-				AnchorJoint.Parent = DefaultParentName;
-				AnchorJoint.Child = DefaultChildName;
-				AnchorJoint.ComponentName1 = DefaultParentName;
-				AnchorJoint.ComponentName2 = DefaultChildName;
-				AnchorJoint.Type = ECadImportJointType::Fixed;
-				AnchorJoint.Axis = FVector::UpVector;
-				if (const FCadImportLink* RootChildLink = LinksByName.Find(DefaultChildName))
-				{
-					AnchorJoint.Transform = RootChildLink->Transform;
-				}
-				else
-				{
-					AnchorJoint.Transform = ChildDocument.RelativeTransform;
-				}
-				Model.Joints.Add(MoveTemp(AnchorJoint));
-			}
-
-			for (const FCadChildJointTemplate& JointTemplate : ChildDocument.Joints)
-			{
-				const FString ParentName = JointTemplate.ParentActorName.TrimStartAndEnd().IsEmpty()
-					? DefaultParentName
-					: JointTemplate.ParentActorName;
-				const FString ChildName = JointTemplate.ChildActorName.TrimStartAndEnd().IsEmpty()
-					? DefaultChildName
-					: JointTemplate.ChildActorName;
-
-				if (!EnsureMasterWorkflowLinkExists(LinksByName, ParentName))
-				{
-					OutError = FString::Printf(TEXT("Joint parent link '%s' was not found in merged links."), *ParentName);
-					return false;
-				}
-
-				if (!EnsureMasterWorkflowLinkExists(LinksByName, ChildName))
-				{
-					OutError = FString::Printf(TEXT("Joint child link '%s' was not found in merged links."), *ChildName);
-					return false;
-				}
-
-				FCadImportJoint Joint;
-				Joint.Name = JointTemplate.JointName.TrimStartAndEnd().IsEmpty()
-					? FString::Printf(TEXT("%s_to_%s"), *ParentName, *ChildName)
-					: JointTemplate.JointName;
-				Joint.Parent = ParentName;
-				Joint.Child = ChildName;
-				Joint.ComponentName1 = ParentName;
-				Joint.ComponentName2 = ChildName;
-				Joint.Type = JointTemplate.JointType;
-				Joint.Axis = JointTemplate.Axis.GetSafeNormal();
-				if (Joint.Axis.IsNearlyZero())
-				{
-					Joint.Axis = FVector::UpVector;
-				}
-				Joint.Limit = JointTemplate.Limit;
-				if (const FCadImportLink* ChildLink = LinksByName.Find(ChildName))
-				{
-					Joint.Transform = ChildLink->Transform;
-				}
-				else
-				{
-					Joint.Transform = FTransform::Identity;
-				}
-
-				if (ChildDocument.ActorType == ECadMasterChildActorType::Movable)
-				{
-					Joint.Drive.bHasDrive = true;
-					Joint.Drive.bEnabled = true;
-					Joint.Drive.Mode = ECadImportJointDriveMode::Position;
-				}
-
-				Model.Joints.Add(MoveTemp(Joint));
-			}
-		}
-
-		OutResult.BuildInput = BuildInput;
-		OutResult.BuildInput.WorkspaceFolder = WorkspaceFolder;
-		OutResult.BuildInput.MasterJsonPath = MasterJsonPath;
-		OutResult.BuildInput.ChildJsonFolderPath = ChildJsonFolderPath;
-		OutResult.BuildInput.ContentRootPath = BuildInput.ContentRootPath.TrimStartAndEnd().IsEmpty()
-			? MasterDocument.ContentRootPath
-			: BuildInput.ContentRootPath;
-		OutResult.MasterDocument = MasterDocument;
-		OutResult.ChildDocuments = MoveTemp(ChildDocuments);
-		OutResult.Model = MoveTemp(Model);
 		return true;
 	}
 }
