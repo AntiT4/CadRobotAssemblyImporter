@@ -2,10 +2,13 @@
 // Copyright (c) 2026 Hyoseung
 
 #include "CadImporterEditor.h"
+#include "CadImporterEditorUserSettings.h"
 #include "ImportService.h"
 #include "UI/WorkflowWizard.h"
 #include "Framework/Docking/TabManager.h"
 #include "Framework/Application/SlateApplication.h"
+#include "ISettingsModule.h"
+#include "Modules/ModuleManager.h"
 #include "ToolMenus.h"
 #include "Widgets/Docking/SDockTab.h"
 
@@ -20,6 +23,17 @@ const FName WorkflowTabName(TEXT("CadImporterEditor.Workflow"));
 
 void FCadImporterEditorModule::StartupModule()
 {
+	if (ISettingsModule* SettingsModule = FModuleManager::GetModulePtr<ISettingsModule>("Settings"))
+	{
+		SettingsModule->RegisterSettings(
+			"Editor",
+			"Plugins",
+			"CadImporterEditor",
+			LOCTEXT("CadImporterSettingsName", "CAD Importer"),
+			LOCTEXT("CadImporterSettingsDescription", "Personal editor settings for CAD workflow previews and debugging."),
+			GetMutableDefault<UCadImporterEditorUserSettings>());
+	}
+
 	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
 		WorkflowTabName,
 		FOnSpawnTab::CreateRaw(this, &FCadImporterEditorModule::SpawnWorkflowTab))
@@ -32,6 +46,11 @@ void FCadImporterEditorModule::StartupModule()
 
 void FCadImporterEditorModule::ShutdownModule()
 {
+	if (ISettingsModule* SettingsModule = FModuleManager::GetModulePtr<ISettingsModule>("Settings"))
+	{
+		SettingsModule->UnregisterSettings("Editor", "Plugins", "CadImporterEditor");
+	}
+
 	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(WorkflowTabName);
 	UToolMenus::UnRegisterStartupCallback(this);
 	UToolMenus::UnregisterOwner(this);

@@ -14,6 +14,16 @@ struct FCadChildJsonResult
 
 namespace CadChildDocExporter
 {
+	void BuildChildDocumentPreview(
+		const FCadMasterDoc& MasterDocument,
+		const FCadChildEntry& ChildEntry,
+		FCadChildDoc& OutDocument);
+
+	bool TrySerializeChildDocument(
+		const FCadChildDoc& ChildDocument,
+		FString& OutJson,
+		FString& OutError);
+
 	bool TryParseMasterDocument(
 		const FString& MasterJsonPath,
 		FCadMasterDoc& OutDocument,

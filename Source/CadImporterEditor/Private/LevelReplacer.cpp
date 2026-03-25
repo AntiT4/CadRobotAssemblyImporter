@@ -3,7 +3,9 @@
 #include "CadImporterEditor.h"
 #include "Editor.h"
 #include "Engine/Blueprint.h"
+#include "Engine/Level.h"
 #include "EngineUtils.h"
+#include "ScopedTransaction.h"
 
 namespace
 {
@@ -151,24 +153,6 @@ namespace CadLevelReplacer
 			return false;
 		}
 
-		const FTransform SpawnTransform = MasterActor->GetActorTransform();
-		FActorSpawnParameters SpawnParams;
-		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-		SpawnParams.Name = NAME_None;
-
-		AActor* SpawnedMasterActor = EditorWorld->SpawnActor<AActor>(MasterBlueprint->GeneratedClass, SpawnTransform, SpawnParams);
-		if (!SpawnedMasterActor)
-		{
-			OutError = TEXT("Failed to spawn master blueprint actor in the level.");
-			return false;
-		}
-
-		const FString SpawnLabelBase = MasterDocument.MasterName.IsEmpty()
-			? TEXT("CadRobot")
-			: FString::Printf(TEXT("%s_BP"), *MasterDocument.MasterName);
-		SpawnedMasterActor->SetActorLabel(SpawnLabelBase, true);
-
-		int32 SpawnedChildActorCount = 0;
 		for (const FCadChildEntry& ChildEntry : MasterDocument.Children)
 		{
 			const FString ChildName = ChildEntry.ActorName.TrimStartAndEnd();
@@ -184,15 +168,63 @@ namespace CadLevelReplacer
 				OutError = FString::Printf(TEXT("Child blueprint was not built or is invalid for child '%s'."), *ChildName);
 				return false;
 			}
+		}
 
+		FScopedTransaction Transaction(
+			TEXT("CadImporterEditor"),
+			FText::FromString(TEXT("CAD Master Workflow Replace Level Actors")),
+			MasterActor,
+			GEditor->CanTransact());
+		if (ULevel* CurrentLevel = EditorWorld->GetCurrentLevel())
+		{
+			CurrentLevel->Modify();
+		}
+		MasterActor->Modify();
+		for (AActor* ActorToDelete : ActorsToDelete)
+		{
+			if (ActorToDelete)
+			{
+				ActorToDelete->Modify();
+			}
+		}
+
+		const FTransform SpawnTransform = MasterActor->GetActorTransform();
+		FActorSpawnParameters SpawnParams;
+		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		SpawnParams.Name = NAME_None;
+		SpawnParams.ObjectFlags |= RF_Transactional;
+
+		AActor* SpawnedMasterActor = EditorWorld->SpawnActor<AActor>(MasterBlueprint->GeneratedClass, SpawnTransform, SpawnParams);
+		if (!SpawnedMasterActor)
+		{
+			OutError = TEXT("Failed to spawn master blueprint actor in the level.");
+			Transaction.Cancel();
+			return false;
+		}
+		SpawnedMasterActor->SetFlags(RF_Transactional);
+		SpawnedMasterActor->Modify();
+
+		const FString SpawnLabelBase = MasterDocument.MasterName.IsEmpty()
+			? TEXT("CadRobot")
+			: FString::Printf(TEXT("%s_BP"), *MasterDocument.MasterName);
+		SpawnedMasterActor->SetActorLabel(SpawnLabelBase, true);
+
+		int32 SpawnedChildActorCount = 0;
+		for (const FCadChildEntry& ChildEntry : MasterDocument.Children)
+		{
+			const FString ChildName = ChildEntry.ActorName.TrimStartAndEnd();
+			UBlueprint* const* ChildBlueprintPtr = ChildBlueprintsByChildName.Find(ChildName);
 			const FTransform ChildWorldTransform = ChildEntry.RelativeTransform * SpawnTransform;
 			AActor* SpawnedChildActor = EditorWorld->SpawnActor<AActor>((*ChildBlueprintPtr)->GeneratedClass, ChildWorldTransform, SpawnParams);
 			if (!SpawnedChildActor)
 			{
 				OutError = FString::Printf(TEXT("Failed to spawn child blueprint actor for '%s'."), *ChildName);
+				Transaction.Cancel();
 				return false;
 			}
 
+			SpawnedChildActor->SetFlags(RF_Transactional);
+			SpawnedChildActor->Modify();
 			SpawnedChildActor->AttachToActor(SpawnedMasterActor, FAttachmentTransformRules::KeepWorldTransform);
 			SpawnedChildActor->SetActorRelativeTransform(ChildEntry.RelativeTransform);
 			SpawnedChildActor->SetActorLabel(FString::Printf(TEXT("BP_%s"), *ChildName), true);
@@ -222,7 +254,10 @@ namespace CadLevelReplacer
 			}
 			else
 			{
+				Transaction.Cancel();
 				UE_LOG(LogCadImporter, Warning, TEXT("Failed to delete actor during replacement: %s"), *ActorToDelete->GetPathName());
+				OutError = FString::Printf(TEXT("Failed to delete actor during replacement: %s"), *ActorToDelete->GetPathName());
+				return false;
 			}
 		}
 
@@ -230,6 +265,7 @@ namespace CadLevelReplacer
 		OutResult.SpawnedActorPath = SpawnedMasterActor->GetPathName();
 		OutResult.SpawnedChildActorCount = SpawnedChildActorCount;
 		OutResult.DeletedActorCount = DeletedActorCount;
+		OutResult.bUsedTransaction = GEditor->CanTransact();
 
 		UE_LOG(
 			LogCadImporter,

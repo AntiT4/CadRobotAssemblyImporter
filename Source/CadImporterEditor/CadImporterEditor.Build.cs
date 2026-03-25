@@ -48,6 +48,7 @@ public class CadImporterEditor : ModuleRules
 				"CoreUObject",
 				"Engine",
 				"StaticMeshEditor",
+				"Settings",
 				"Slate",
 				"SlateCore",
 				// ... add private dependencies that you statically link with here ...	

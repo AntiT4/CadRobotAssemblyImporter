@@ -11,6 +11,7 @@ struct FCadLevelReplaceResult
 	FString SpawnedActorPath;
 	int32 SpawnedChildActorCount = 0;
 	int32 DeletedActorCount = 0;
+	bool bUsedTransaction = false;
 };
 
 namespace CadLevelReplacer

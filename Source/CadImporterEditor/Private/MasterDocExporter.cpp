@@ -190,6 +190,11 @@ namespace
 
 namespace CadMasterDocExporter
 {
+	bool TrySerializeDocument(const FCadMasterDoc& Document, FString& OutJson, FString& OutError)
+	{
+		return TrySerializeMasterDocument(Document, OutJson, OutError);
+	}
+
 	bool TryGenerateAndWriteFromSelectionResult(
 		const FCadMasterSelection& SelectionResult,
 		const FString& WorkspaceFolderOverride,

@@ -637,6 +637,7 @@ bool FCadBlueprintBuilder::BuildComponents(
 	}
 
 	const bool bIsFixedAssembly = (Model.Profile == ECadImportModelProfile::FixedAssembly);
+	const bool bUseFlatLinkHierarchy = !bIsFixedAssembly;
 
 	FString BaseLinkName = Model.RootLinkName;
 	if (BaseLinkName.IsEmpty() && Model.Links.Num() > 0)
@@ -645,7 +646,9 @@ bool FCadBlueprintBuilder::BuildComponents(
 	}
 
 	USimpleConstructionScript* SCS = Blueprint->SimpleConstructionScript;
-	USCS_Node* RootNode = EnsureRootNode(SCS, BuildRootComponentName(BaseLinkName));
+	USCS_Node* RootNode = EnsureRootNode(
+		SCS,
+		bUseFlatLinkHierarchy ? FName(TEXT("DefaultSceneRoot")) : BuildRootComponentName(BaseLinkName));
 	if (!RootNode)
 	{
 		OutError = TEXT("Failed to create/find root scene node.");
@@ -705,7 +708,7 @@ bool FCadBlueprintBuilder::BuildComponents(
 
 	for (const FCadImportLink& Link : Model.Links)
 	{
-		if (!BaseLinkName.IsEmpty() && Link.Name == BaseLinkName)
+		if (!bUseFlatLinkHierarchy && !BaseLinkName.IsEmpty() && Link.Name == BaseLinkName)
 		{
 			// Root link should be represented by the SCS root node itself.
 			LinkNodeByName.Add(Link.Name, RootNode);
@@ -732,7 +735,7 @@ bool FCadBlueprintBuilder::BuildComponents(
 
 		const bool bIsBaseLink = (!BaseLinkName.IsEmpty() && Link.Name == BaseLinkName);
 		USCS_Node* ParentNode = RootNode;
-		if (!bIsBaseLink)
+		if (!bUseFlatLinkHierarchy && !bIsBaseLink)
 		{
 			if (const FString* ParentLinkName = ParentByChild.Find(Link.Name))
 			{
@@ -743,13 +746,20 @@ bool FCadBlueprintBuilder::BuildComponents(
 			}
 		}
 
-		if (!bIsBaseLink)
+		if (bUseFlatLinkHierarchy || !bIsBaseLink)
 		{
 			ParentNode->AddChildNode(*LinkNodePtr);
 		}
 
 		FTransform RelativeTransform = FTransform::Identity;
-		if (!bIsBaseLink)
+		if (bUseFlatLinkHierarchy)
+		{
+			if (const FTransform* LinkTransform = LinkTransformByName.Find(Link.Name))
+			{
+				RelativeTransform = *LinkTransform;
+			}
+		}
+		else if (!bIsBaseLink)
 		{
 			if (const FTransform* JointTransform = RelativeTransformByChild.Find(Link.Name))
 			{

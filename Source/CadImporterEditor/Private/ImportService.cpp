@@ -98,8 +98,16 @@ bool FCadImportService::RunImport(const FString& JsonPath, const FCadFbxImportOp
 	return true;
 }
 
-bool FCadImportService::BuildFromWorkflow(const FCadWorkflowBuildInput& BuildInput, const FCadFbxImportOptions& ImportOptions) const
+bool FCadImportService::BuildFromWorkflow(
+	const FCadWorkflowBuildInput& BuildInput,
+	const FCadFbxImportOptions& ImportOptions,
+	FCadLevelReplaceResult* OutReplaceResult) const
 {
+	if (OutReplaceResult)
+	{
+		*OutReplaceResult = FCadLevelReplaceResult();
+	}
+
 	FString Error;
 	const FString MasterJsonPath = BuildInput.MasterJsonPath.TrimStartAndEnd();
 	if (MasterJsonPath.IsEmpty())
@@ -205,6 +213,12 @@ bool FCadImportService::BuildFromWorkflow(const FCadWorkflowBuildInput& BuildInp
 		*ReplaceResult.SpawnedActorPath,
 		ReplaceResult.SpawnedChildActorCount,
 		ReplaceResult.DeletedActorCount);
+
+	if (OutReplaceResult)
+	{
+		*OutReplaceResult = ReplaceResult;
+	}
+
 	return true;
 }
 

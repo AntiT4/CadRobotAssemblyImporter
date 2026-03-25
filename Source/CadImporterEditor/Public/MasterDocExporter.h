@@ -15,6 +15,11 @@ struct FCadMasterJsonGenerationResult
 
 namespace CadMasterDocExporter
 {
+	bool TrySerializeDocument(
+		const FCadMasterDoc& Document,
+		FString& OutJson,
+		FString& OutError);
+
 	bool TryGenerateAndWriteFromSelectionResult(
 		const FCadMasterSelection& SelectionResult,
 		const FString& WorkspaceFolderOverride,

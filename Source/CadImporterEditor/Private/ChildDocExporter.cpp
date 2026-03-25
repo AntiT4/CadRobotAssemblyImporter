@@ -50,6 +50,7 @@ namespace
 	void BuildMovableChildHierarchyRecursive(
 		AActor* CurrentActor,
 		AActor* ParentActor,
+		AActor* RootActor,
 		const FTransform& RootRelativeTransform,
 		FCadChildDoc& InOutChildDocument)
 	{
@@ -59,21 +60,22 @@ namespace
 		}
 
 		const FString CurrentLinkName = GetActorDisplayNameForExtractor(CurrentActor);
-		const bool bIsRoot = (ParentActor == nullptr);
-
-		FCadChildLinkDef LinkTemplate;
-		LinkTemplate.LinkName = CurrentLinkName;
-		LinkTemplate.RelativeTransform = bIsRoot
-			? RootRelativeTransform
-			: CurrentActor->GetActorTransform().GetRelativeTransform(ParentActor->GetActorTransform());
-		CadChildVisualCollector::CollectRootLinkVisuals(CurrentActor, LinkTemplate.Visuals);
-		InOutChildDocument.Links.Add(MoveTemp(LinkTemplate));
-
-		if (!bIsRoot)
+		const bool bIsRootActor = (CurrentActor == RootActor);
+		if (!bIsRootActor)
 		{
-			const FString ParentLinkName = GetActorDisplayNameForExtractor(ParentActor);
+			FCadChildLinkDef LinkTemplate;
+			LinkTemplate.LinkName = CurrentLinkName;
+			LinkTemplate.RelativeTransform = (ParentActor == RootActor)
+				? CurrentActor->GetActorTransform().GetRelativeTransform(RootActor->GetActorTransform())
+				: CurrentActor->GetActorTransform().GetRelativeTransform(ParentActor->GetActorTransform());
+			CadChildVisualCollector::CollectRootLinkVisuals(CurrentActor, LinkTemplate.Visuals);
+			InOutChildDocument.Links.Add(MoveTemp(LinkTemplate));
+
 			FCadChildJointDef JointTemplate;
-			JointTemplate.JointName = FString::Printf(TEXT("%s_to_%s"), *ParentLinkName, *CurrentLinkName);
+			const FString ParentLinkName = (ParentActor == RootActor) ? FString() : GetActorDisplayNameForExtractor(ParentActor);
+			JointTemplate.JointName = ParentLinkName.TrimStartAndEnd().IsEmpty()
+				? FString::Printf(TEXT("world_to_%s"), *CurrentLinkName)
+				: FString::Printf(TEXT("%s_to_%s"), *ParentLinkName, *CurrentLinkName);
 			JointTemplate.JointType = ECadImportJointType::Fixed;
 			JointTemplate.ParentActorName = ParentLinkName;
 			JointTemplate.ChildActorName = CurrentLinkName;
@@ -90,7 +92,7 @@ namespace
 				continue;
 			}
 
-			BuildMovableChildHierarchyRecursive(ChildActor, CurrentActor, RootRelativeTransform, InOutChildDocument);
+			BuildMovableChildHierarchyRecursive(ChildActor, CurrentActor, RootActor, RootRelativeTransform, InOutChildDocument);
 		}
 	}
 
@@ -104,25 +106,7 @@ namespace
 			return;
 		}
 
-		BuildMovableChildHierarchyRecursive(ChildRootActor, nullptr, ChildEntry.RelativeTransform, InOutChildDocument);
-		if (InOutChildDocument.Links.Num() <= 0)
-		{
-			return;
-		}
-
-		const FString RootLinkName = InOutChildDocument.Links[0].LinkName;
-		if (RootLinkName.TrimStartAndEnd().IsEmpty())
-		{
-			return;
-		}
-
-		FCadChildJointDef RootAnchorJoint;
-		RootAnchorJoint.JointName = FString::Printf(TEXT("master_to_%s"), *RootLinkName);
-		RootAnchorJoint.JointType = ECadImportJointType::Fixed;
-		RootAnchorJoint.ParentActorName = TEXT("");
-		RootAnchorJoint.ChildActorName = RootLinkName;
-		RootAnchorJoint.Axis = FVector::UpVector;
-		InOutChildDocument.Joints.Insert(MoveTemp(RootAnchorJoint), 0);
+		BuildMovableChildHierarchyRecursive(ChildRootActor, nullptr, ChildRootActor, ChildEntry.RelativeTransform, InOutChildDocument);
 	}
 
 	TSharedPtr<FJsonObject> MakeJointTemplateObject(const FCadChildJointDef& Joint)
@@ -221,7 +205,7 @@ namespace
 		return ChildDocument;
 	}
 
-	bool TrySerializeChildDocument(const FCadChildDoc& ChildDocument, FString& OutJson, FString& OutError)
+	bool TrySerializeChildDocumentInternal(const FCadChildDoc& ChildDocument, FString& OutJson, FString& OutError)
 	{
 		TSharedPtr<FJsonObject> RootObject = MakeShared<FJsonObject>();
 		RootObject->SetStringField(TEXT("master_name"), ChildDocument.MasterName);
@@ -273,7 +257,7 @@ namespace
 	bool TryWriteChildDocumentToFile(const FCadChildDoc& ChildDocument, const FString& OutputPath, FString& OutError)
 	{
 		FString JsonText;
-		if (!TrySerializeChildDocument(ChildDocument, JsonText, OutError))
+		if (!TrySerializeChildDocumentInternal(ChildDocument, JsonText, OutError))
 		{
 			return false;
 		}
@@ -313,6 +297,23 @@ namespace
 
 namespace CadChildDocExporter
 {
+	void BuildChildDocumentPreview(
+		const FCadMasterDoc& MasterDocument,
+		const FCadChildEntry& ChildEntry,
+		FCadChildDoc& OutDocument)
+	{
+		AActor* ChildRootActor = CadActorHierarchyUtils::FindByPath(ChildEntry.ActorPath);
+		OutDocument = BuildChildDocumentTemplate(MasterDocument, ChildEntry, ChildRootActor);
+	}
+
+	bool TrySerializeChildDocument(
+		const FCadChildDoc& ChildDocument,
+		FString& OutJson,
+		FString& OutError)
+	{
+		return TrySerializeChildDocumentInternal(ChildDocument, OutJson, OutError);
+	}
+
 	bool TryParseMasterDocument(
 		const FString& MasterJsonPath,
 		FCadMasterDoc& OutDocument,
