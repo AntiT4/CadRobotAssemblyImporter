@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="180" viewBox="0 0 920 180">
+  <rect width="920" height="180" rx="18" fill="#f7f4ea"/>
+  <rect x="12" y="12" width="896" height="156" rx="14" fill="#fffdf7" stroke="#d7c9aa" stroke-width="2"/>
+  <line x1="140" y1="78" x2="244" y2="78" stroke="#c8b98d" stroke-width="6" stroke-linecap="round"/>
+  <line x1="320" y1="78" x2="424" y2="78" stroke="#c8b98d" stroke-width="6" stroke-linecap="round"/>
+  <line x1="500" y1="78" x2="604" y2="78" stroke="#c8b98d" stroke-width="6" stroke-linecap="round"/>
+  <line x1="680" y1="78" x2="784" y2="78" stroke="#c8b98d" stroke-width="6" stroke-linecap="round"/>
+  <g font-family="Segoe UI, Arial, sans-serif" text-anchor="middle">
+    <circle cx="90" cy="78" r="36" fill="#1f5f5b"/>
+    <text x="90" y="84" font-size="24" font-weight="700" fill="#ffffff">1</text>
+    <text x="90" y="132" font-size="17" font-weight="700" fill="#26403e">Workspace</text>
+
+    <circle cx="270" cy="78" r="36" fill="#2d7d77"/>
+    <text x="270" y="84" font-size="24" font-weight="700" fill="#ffffff">2</text>
+    <text x="270" y="132" font-size="17" font-weight="700" fill="#26403e">Master</text>
+
+    <circle cx="450" cy="78" r="36" fill="#c38a2e"/>
+    <text x="450" y="84" font-size="24" font-weight="700" fill="#ffffff">3</text>
+    <text x="450" y="132" font-size="17" font-weight="700" fill="#26403e">Child Type</text>
+
+    <circle cx="630" cy="78" r="36" fill="#b9573c"/>
+    <text x="630" y="84" font-size="24" font-weight="700" fill="#ffffff">4</text>
+    <text x="630" y="132" font-size="17" font-weight="700" fill="#26403e">Joint Setup</text>
+
+    <circle cx="810" cy="78" r="36" fill="#5d4aa8"/>
+    <text x="810" y="84" font-size="24" font-weight="700" fill="#ffffff">5</text>
+    <text x="810" y="132" font-size="17" font-weight="700" fill="#26403e">Build Actor</text>
+  </g>
+</svg>

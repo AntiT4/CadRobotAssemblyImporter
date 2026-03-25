@@ -8,6 +8,7 @@
 #include "Editor/ActorHierarchyUtils.h"
 #include "Editor.h"
 #include "Components/SceneComponent.h"
+#include "Components/PrimitiveComponent.h"
 #include "Engine/Selection.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/World.h"
@@ -18,6 +19,7 @@
 #include "Misc/Paths.h"
 #include "DrawDebugHelpers.h"
 #include "Workflow/WorkspaceUtils.h"
+#include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SComboBox.h"
@@ -283,6 +285,92 @@ namespace
 			PreviousPoint = CurrentPoint;
 		}
 	}
+
+	void DrawDebugActorBounds(
+		UWorld* World,
+		AActor* Actor,
+		const FColor& Color,
+		const bool bPersistent,
+		const float LifeTime,
+		const float Thickness)
+	{
+		if (!World || !Actor)
+		{
+			return;
+		}
+
+		TFunction<void(AActor*, FBox&)> AccumulatePrimitiveBounds = [&](AActor* CurrentActor, FBox& InOutBounds)
+		{
+			if (!CurrentActor)
+			{
+				return;
+			}
+
+			TInlineComponentArray<UPrimitiveComponent*> PrimitiveComponents(CurrentActor);
+			for (UPrimitiveComponent* PrimitiveComponent : PrimitiveComponents)
+			{
+				if (!PrimitiveComponent ||
+					!PrimitiveComponent->IsRegistered() ||
+					PrimitiveComponent->IsVisualizationComponent())
+				{
+					continue;
+				}
+
+				InOutBounds += PrimitiveComponent->Bounds.GetBox();
+			}
+
+			TArray<AActor*> DirectChildren;
+			CadActorHierarchyUtils::GetSortedAttachedChildren(CurrentActor, DirectChildren, false);
+			for (AActor* DirectChild : DirectChildren)
+			{
+				AccumulatePrimitiveBounds(DirectChild, InOutBounds);
+			}
+		};
+
+		FBox Bounds(EForceInit::ForceInit);
+		AccumulatePrimitiveBounds(Actor, Bounds);
+
+		if (!Bounds.IsValid)
+		{
+			return;
+		}
+
+		DrawDebugBox(
+			World,
+			Bounds.GetCenter(),
+			Bounds.GetExtent(),
+			FQuat::Identity,
+			Color,
+			bPersistent,
+			LifeTime,
+			0,
+			Thickness);
+	}
+
+	void DrawDebugActorAxes(
+		UWorld* World,
+		AActor* Actor,
+		const float AxisLength,
+		const bool bPersistent,
+		const float LifeTime,
+		const uint8 DepthPriority,
+		const float Thickness)
+	{
+		if (!World || !Actor)
+		{
+			return;
+		}
+
+		const FTransform ActorTransform = Actor->GetActorTransform();
+		const FVector Origin = ActorTransform.GetLocation();
+		const FVector AxisX = ActorTransform.TransformVectorNoScale(FVector::ForwardVector).GetSafeNormal();
+		const FVector AxisY = ActorTransform.TransformVectorNoScale(FVector::RightVector).GetSafeNormal();
+		const FVector AxisZ = ActorTransform.TransformVectorNoScale(FVector::UpVector).GetSafeNormal();
+
+		DrawDebugLine(World, Origin, Origin + (AxisX * AxisLength), FColor(255, 80, 80), bPersistent, LifeTime, DepthPriority, Thickness);
+		DrawDebugLine(World, Origin, Origin + (AxisY * AxisLength), FColor(80, 220, 120), bPersistent, LifeTime, DepthPriority, Thickness);
+		DrawDebugLine(World, Origin, Origin + (AxisZ * AxisLength), FColor(80, 160, 255), bPersistent, LifeTime, DepthPriority, Thickness);
+	}
 }
 
 void SCadWorkflowWizard::Construct(const FArguments& InArgs)
@@ -348,6 +436,18 @@ void SCadWorkflowWizard::Construct(const FArguments& InArgs)
 				+ SWidgetSwitcher::Slot()
 				[
 					SNew(SVerticalBox)
+
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(0.0f, 0.0f, 0.0f, 10.0f)
+					[
+						SNew(SBox)
+						.HeightOverride(150.0f)
+						[
+							SNew(SImage)
+							.Image(FCadImporterEditorModule::GetWorkflowStepBrush())
+						]
+					]
 
 					+ SVerticalBox::Slot()
 					.AutoHeight()
@@ -869,7 +969,12 @@ EActiveTimerReturnType SCadWorkflowWizard::UpdateJointTestAnimation(double Curre
 	}
 
 	TargetRootComponent->SetRelativeTransform(AnimatedRelativeTransform);
-	RedrawJointPreviewLines();
+	if (UWorld* World = TargetActor->GetWorld())
+	{
+		const UCadImporterEditorUserSettings* Settings = GetDefault<UCadImporterEditorUserSettings>();
+		const uint8 DepthPriority = (Settings && Settings->bDrawJointPreviewLinesInForeground) ? 1 : 0;
+		DrawDebugActorAxes(World, TargetActor, 12.0f, false, 0.1f, DepthPriority, 1.0f);
+	}
 	if (GEditor)
 	{
 		GEditor->RedrawAllViewports(false);
@@ -1306,7 +1411,12 @@ void SCadWorkflowWizard::RebuildJointEditorRows()
 							.AutoHeight()
 							[
 								SNew(SNumericEntryBox<float>)
-								.AllowSpin(false)
+								.AllowSpin(true)
+								.PreventThrottling(true)
+								.MinValue(0.0f)
+								.MaxValue(1.0f)
+								.MinSliderValue(0.0f)
+								.MaxSliderValue(1.0f)
 								.IsEnabled_Lambda([this, ChildDocIndex, JointIndex]()
 								{
 									return EditableJointChildren.IsValidIndex(ChildDocIndex) &&
@@ -1321,6 +1431,10 @@ void SCadWorkflowWizard::RebuildJointEditorRows()
 										return TOptional<float>();
 									}
 									return EditableJointChildren[ChildDocIndex].ChildDocument.Joints[JointIndex].Axis.X;
+								})
+								.OnValueChanged_Lambda([this, ChildDocIndex, JointIndex](const float NewValue)
+								{
+									SetJointAxisX(ChildDocIndex, JointIndex, NewValue);
 								})
 								.OnValueCommitted_Lambda([this, ChildDocIndex, JointIndex](const float NewValue, ETextCommit::Type)
 								{
@@ -1346,7 +1460,12 @@ void SCadWorkflowWizard::RebuildJointEditorRows()
 							.AutoHeight()
 							[
 								SNew(SNumericEntryBox<float>)
-								.AllowSpin(false)
+								.AllowSpin(true)
+								.PreventThrottling(true)
+								.MinValue(0.0f)
+								.MaxValue(1.0f)
+								.MinSliderValue(0.0f)
+								.MaxSliderValue(1.0f)
 								.IsEnabled_Lambda([this, ChildDocIndex, JointIndex]()
 								{
 									return EditableJointChildren.IsValidIndex(ChildDocIndex) &&
@@ -1361,6 +1480,10 @@ void SCadWorkflowWizard::RebuildJointEditorRows()
 										return TOptional<float>();
 									}
 									return EditableJointChildren[ChildDocIndex].ChildDocument.Joints[JointIndex].Axis.Y;
+								})
+								.OnValueChanged_Lambda([this, ChildDocIndex, JointIndex](const float NewValue)
+								{
+									SetJointAxisY(ChildDocIndex, JointIndex, NewValue);
 								})
 								.OnValueCommitted_Lambda([this, ChildDocIndex, JointIndex](const float NewValue, ETextCommit::Type)
 								{
@@ -1385,7 +1508,12 @@ void SCadWorkflowWizard::RebuildJointEditorRows()
 							.AutoHeight()
 							[
 								SNew(SNumericEntryBox<float>)
-								.AllowSpin(false)
+								.AllowSpin(true)
+								.PreventThrottling(true)
+								.MinValue(0.0f)
+								.MaxValue(1.0f)
+								.MinSliderValue(0.0f)
+								.MaxSliderValue(1.0f)
 								.IsEnabled_Lambda([this, ChildDocIndex, JointIndex]()
 								{
 									return EditableJointChildren.IsValidIndex(ChildDocIndex) &&
@@ -1400,6 +1528,10 @@ void SCadWorkflowWizard::RebuildJointEditorRows()
 										return TOptional<float>();
 									}
 									return EditableJointChildren[ChildDocIndex].ChildDocument.Joints[JointIndex].Axis.Z;
+								})
+								.OnValueChanged_Lambda([this, ChildDocIndex, JointIndex](const float NewValue)
+								{
+									SetJointAxisZ(ChildDocIndex, JointIndex, NewValue);
 								})
 								.OnValueCommitted_Lambda([this, ChildDocIndex, JointIndex](const float NewValue, ETextCommit::Type)
 								{
@@ -1464,7 +1596,10 @@ void SCadWorkflowWizard::RebuildJointEditorRows()
 							.AutoHeight()
 							[
 								SNew(SNumericEntryBox<float>)
-								.AllowSpin(false)
+								.AllowSpin(true)
+								.PreventThrottling(true)
+								.MinSliderValue(-270.0f)
+								.MaxSliderValue(270.0f)
 								.IsEnabled_Lambda([this, ChildDocIndex, JointIndex]()
 								{
 									return EditableJointChildren.IsValidIndex(ChildDocIndex) &&
@@ -1479,6 +1614,10 @@ void SCadWorkflowWizard::RebuildJointEditorRows()
 										return TOptional<float>();
 									}
 									return EditableJointChildren[ChildDocIndex].ChildDocument.Joints[JointIndex].Limit.Lower;
+								})
+								.OnValueChanged_Lambda([this, ChildDocIndex, JointIndex](const float NewValue)
+								{
+									SetJointLimitLower(ChildDocIndex, JointIndex, NewValue);
 								})
 								.OnValueCommitted_Lambda([this, ChildDocIndex, JointIndex](const float NewValue, ETextCommit::Type)
 								{
@@ -1504,7 +1643,10 @@ void SCadWorkflowWizard::RebuildJointEditorRows()
 							.AutoHeight()
 							[
 								SNew(SNumericEntryBox<float>)
-								.AllowSpin(false)
+								.AllowSpin(true)
+								.PreventThrottling(true)
+								.MinSliderValue(-270.0f)
+								.MaxSliderValue(270.0f)
 								.IsEnabled_Lambda([this, ChildDocIndex, JointIndex]()
 								{
 									return EditableJointChildren.IsValidIndex(ChildDocIndex) &&
@@ -1519,6 +1661,10 @@ void SCadWorkflowWizard::RebuildJointEditorRows()
 										return TOptional<float>();
 									}
 									return EditableJointChildren[ChildDocIndex].ChildDocument.Joints[JointIndex].Limit.Upper;
+								})
+								.OnValueChanged_Lambda([this, ChildDocIndex, JointIndex](const float NewValue)
+								{
+									SetJointLimitUpper(ChildDocIndex, JointIndex, NewValue);
 								})
 								.OnValueCommitted_Lambda([this, ChildDocIndex, JointIndex](const float NewValue, ETextCommit::Type)
 								{
@@ -1684,7 +1830,7 @@ void SCadWorkflowWizard::SetJointAxisX(const int32 ChildDocIndex, const int32 Jo
 		return;
 	}
 
-	EditableJointChildren[ChildDocIndex].ChildDocument.Joints[JointIndex].Axis.X = Value;
+	EditableJointChildren[ChildDocIndex].ChildDocument.Joints[JointIndex].Axis.X = FMath::Clamp(Value, 0.0f, 1.0f);
 	RedrawJointPreviewLines();
 }
 
@@ -1696,7 +1842,7 @@ void SCadWorkflowWizard::SetJointAxisY(const int32 ChildDocIndex, const int32 Jo
 		return;
 	}
 
-	EditableJointChildren[ChildDocIndex].ChildDocument.Joints[JointIndex].Axis.Y = Value;
+	EditableJointChildren[ChildDocIndex].ChildDocument.Joints[JointIndex].Axis.Y = FMath::Clamp(Value, 0.0f, 1.0f);
 	RedrawJointPreviewLines();
 }
 
@@ -1708,7 +1854,7 @@ void SCadWorkflowWizard::SetJointAxisZ(const int32 ChildDocIndex, const int32 Jo
 		return;
 	}
 
-	EditableJointChildren[ChildDocIndex].ChildDocument.Joints[JointIndex].Axis.Z = Value;
+	EditableJointChildren[ChildDocIndex].ChildDocument.Joints[JointIndex].Axis.Z = FMath::Clamp(Value, 0.0f, 1.0f);
 	RedrawJointPreviewLines();
 }
 
@@ -1721,6 +1867,7 @@ void SCadWorkflowWizard::SetJointLimitEnabled(const int32 ChildDocIndex, const i
 	}
 
 	EditableJointChildren[ChildDocIndex].ChildDocument.Joints[JointIndex].Limit.bHasLimit = bEnabled;
+	RedrawJointPreviewLines();
 }
 
 void SCadWorkflowWizard::SetJointLimitLower(const int32 ChildDocIndex, const int32 JointIndex, const float Value)
@@ -1732,6 +1879,7 @@ void SCadWorkflowWizard::SetJointLimitLower(const int32 ChildDocIndex, const int
 	}
 
 	EditableJointChildren[ChildDocIndex].ChildDocument.Joints[JointIndex].Limit.Lower = Value;
+	RedrawJointPreviewLines();
 }
 
 void SCadWorkflowWizard::SetJointLimitUpper(const int32 ChildDocIndex, const int32 JointIndex, const float Value)
@@ -1743,6 +1891,7 @@ void SCadWorkflowWizard::SetJointLimitUpper(const int32 ChildDocIndex, const int
 	}
 
 	EditableJointChildren[ChildDocIndex].ChildDocument.Joints[JointIndex].Limit.Upper = Value;
+	RedrawJointPreviewLines();
 }
 
 void SCadWorkflowWizard::SetJointLimitEffort(const int32 ChildDocIndex, const int32 JointIndex, const float Value)
@@ -1754,6 +1903,7 @@ void SCadWorkflowWizard::SetJointLimitEffort(const int32 ChildDocIndex, const in
 	}
 
 	EditableJointChildren[ChildDocIndex].ChildDocument.Joints[JointIndex].Limit.Effort = Value;
+	RedrawJointPreviewLines();
 }
 
 void SCadWorkflowWizard::SetJointLimitVelocity(const int32 ChildDocIndex, const int32 JointIndex, const float Value)
@@ -1765,6 +1915,7 @@ void SCadWorkflowWizard::SetJointLimitVelocity(const int32 ChildDocIndex, const 
 	}
 
 	EditableJointChildren[ChildDocIndex].ChildDocument.Joints[JointIndex].Limit.Velocity = Value;
+	RedrawJointPreviewLines();
 }
 
 bool SCadWorkflowWizard::ValidateEditedJointDefinitions(FString& OutError) const
@@ -1879,7 +2030,19 @@ void SCadWorkflowWizard::SetJointDebugDrawEnabled(const int32 ChildDocIndex, con
 		return;
 	}
 
-	EditableJointChildren[ChildDocIndex].JointDebugDrawEnabled[JointIndex] = bEnabled;
+	for (FEditableJointChildState& ChildState : EditableJointChildren)
+	{
+		for (bool& bJointEnabled : ChildState.JointDebugDrawEnabled)
+		{
+			bJointEnabled = false;
+		}
+	}
+
+	if (bEnabled)
+	{
+		EditableJointChildren[ChildDocIndex].JointDebugDrawEnabled[JointIndex] = true;
+	}
+
 	RedrawJointPreviewLines();
 }
 
@@ -1946,6 +2109,7 @@ void SCadWorkflowWizard::RunJointLimitTest(const int32 ChildDocIndex, const int3
 	}
 
 	JointTestAnimation = AnimationState;
+	RedrawJointPreviewLines();
 }
 
 void SCadWorkflowWizard::StopJointTestAnimation(const bool bRestoreTransform)
@@ -2001,6 +2165,9 @@ void SCadWorkflowWizard::RedrawJointPreviewLines()
 	const float DefaultRevoluteRadius = 35.0f;
 	const float DefaultPrismaticHalfLength = 25.0f;
 	const float LimitMarkerHalfSize = 8.0f;
+	const float BoundsLineThickness = 1.0f;
+	const float ActorAxesLength = 12.0f;
+	const FColor GuideLineColor = FColor(210, 210, 210, 255);
 
 	for (const FEditableJointChildState& ChildState : EditableJointChildren)
 	{
@@ -2025,6 +2192,7 @@ void SCadWorkflowWizard::RedrawJointPreviewLines()
 			LinkTransforms.Add(DescendantActor->GetActorNameOrLabel(), DescendantActor->GetActorTransform());
 		}
 		const FVector WorldAnchorLocation = ChildRootActor->GetActorLocation();
+		TSet<FString> BoundsDrawnActors;
 
 		for (int32 JointIndex = 0; JointIndex < ChildState.ChildDocument.Joints.Num(); ++JointIndex)
 		{
@@ -2041,6 +2209,7 @@ void SCadWorkflowWizard::RedrawJointPreviewLines()
 			}
 
 			const FVector* ChildLocation = LinkLocations.Find(ChildName);
+			AActor* ChildActor = FindNonStaticDescendantActorByName(ChildRootActor, ChildName);
 			if (!ChildLocation)
 			{
 				continue;
@@ -2048,17 +2217,38 @@ void SCadWorkflowWizard::RedrawJointPreviewLines()
 
 			const FString ParentName = JointDef.ParentActorName.TrimStartAndEnd();
 			const FVector* ParentLocation = ParentName.IsEmpty() ? nullptr : LinkLocations.Find(ParentName);
+			AActor* ParentActor = ParentName.IsEmpty() ? nullptr : FindNonStaticDescendantActorByName(ChildRootActor, ParentName);
 			const FVector Start = ParentLocation ? *ParentLocation : WorldAnchorLocation;
 			const FVector End = *ChildLocation;
+			const FColor JointColor = JointTypeToPreviewColor(Settings, JointDef.JointType);
+			FColor ParentBoundsColor = FColor(110, 220, 140, 180);
+			FColor ChildBoundsColor = FColor(90, 170, 255, 180);
 			DrawDebugLine(
 				World,
 				Start,
 				End,
-				JointTypeToPreviewColor(Settings, JointDef.JointType),
+				GuideLineColor,
 				true,
 				-1.0f,
 				DepthPriority,
 				LineThickness);
+
+			if (ParentActor && !BoundsDrawnActors.Contains(ParentName))
+			{
+				DrawDebugActorBounds(World, ParentActor, ParentBoundsColor, true, -1.0f, BoundsLineThickness);
+				DrawDebugActorAxes(World, ParentActor, ActorAxesLength, true, -1.0f, DepthPriority, BoundsLineThickness);
+				BoundsDrawnActors.Add(ParentName);
+			}
+
+			if (ChildActor && !BoundsDrawnActors.Contains(ChildName))
+			{
+				DrawDebugActorBounds(World, ChildActor, ChildBoundsColor, true, -1.0f, BoundsLineThickness);
+				if (!(JointTestAnimation.IsSet() && JointTestAnimation.GetValue().TargetActor.Get() == ChildActor))
+				{
+					DrawDebugActorAxes(World, ChildActor, ActorAxesLength, true, -1.0f, DepthPriority, BoundsLineThickness);
+				}
+				BoundsDrawnActors.Add(ChildName);
+			}
 
 			if (JointTypeUsesAxis(JointDef.JointType))
 			{
@@ -2081,7 +2271,7 @@ void SCadWorkflowWizard::RedrawJointPreviewLines()
 					End,
 					End + (AxisDirection * AxisDrawLength),
 					12.0f,
-					JointTypeToPreviewColor(Settings, JointDef.JointType),
+					JointColor,
 					true,
 					-1.0f,
 					DepthPriority,
@@ -2098,7 +2288,7 @@ void SCadWorkflowWizard::RedrawJointPreviewLines()
 						DefaultRevoluteRadius,
 						StartAngleDegrees,
 						EndAngleDegrees,
-						JointTypeToPreviewColor(Settings, JointDef.JointType),
+						JointColor,
 						true,
 						-1.0f,
 						DepthPriority,
@@ -2114,7 +2304,7 @@ void SCadWorkflowWizard::RedrawJointPreviewLines()
 						World,
 						RangeStart,
 						RangeEnd,
-						JointTypeToPreviewColor(Settings, JointDef.JointType),
+						JointColor,
 						true,
 						-1.0f,
 						DepthPriority,
@@ -2127,7 +2317,7 @@ void SCadWorkflowWizard::RedrawJointPreviewLines()
 						World,
 						RangeStart - (MarkerAxisX * LimitMarkerHalfSize),
 						RangeStart + (MarkerAxisX * LimitMarkerHalfSize),
-						JointTypeToPreviewColor(Settings, JointDef.JointType),
+						JointColor,
 						true,
 						-1.0f,
 						DepthPriority,
@@ -2136,7 +2326,7 @@ void SCadWorkflowWizard::RedrawJointPreviewLines()
 						World,
 						RangeEnd - (MarkerAxisX * LimitMarkerHalfSize),
 						RangeEnd + (MarkerAxisX * LimitMarkerHalfSize),
-						JointTypeToPreviewColor(Settings, JointDef.JointType),
+						JointColor,
 						true,
 						-1.0f,
 						DepthPriority,
@@ -2145,7 +2335,7 @@ void SCadWorkflowWizard::RedrawJointPreviewLines()
 						World,
 						RangeStart - (MarkerAxisY * LimitMarkerHalfSize),
 						RangeStart + (MarkerAxisY * LimitMarkerHalfSize),
-						JointTypeToPreviewColor(Settings, JointDef.JointType),
+						JointColor,
 						true,
 						-1.0f,
 						DepthPriority,
@@ -2154,7 +2344,7 @@ void SCadWorkflowWizard::RedrawJointPreviewLines()
 						World,
 						RangeEnd - (MarkerAxisY * LimitMarkerHalfSize),
 						RangeEnd + (MarkerAxisY * LimitMarkerHalfSize),
-						JointTypeToPreviewColor(Settings, JointDef.JointType),
+						JointColor,
 						true,
 						-1.0f,
 						DepthPriority,
@@ -2307,62 +2497,79 @@ void SCadWorkflowWizard::RebuildChildRows()
 		.AutoHeight()
 		.Padding(0.0f, 0.0f, 0.0f, 6.0f)
 		[
-			SNew(SHorizontalBox)
+			SNew(SVerticalBox)
 
-			+ SHorizontalBox::Slot()
-			.FillWidth(1.0f)
-			.VAlign(VAlign_Center)
+			+ SVerticalBox::Slot()
+			.AutoHeight()
 			[
-				SNew(STextBlock)
-				.Text(FText::FromString(ChildEntries[ChildIndex].ActorName))
-			]
+				SNew(SHorizontalBox)
 
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.Padding(0.0f, 0.0f, 8.0f, 0.0f)
-			.HAlign(HAlign_Right)
-			.VAlign(VAlign_Center)
-			[
-				SNew(SComboBox<TSharedPtr<FString>>)
-				.OptionsSource(&ChildTypeItems)
-				.OnGenerateWidget_Lambda([](const TSharedPtr<FString> Item)
-				{
-					return SNew(STextBlock).Text(FText::FromString(Item.IsValid() ? *Item : TEXT("")));
-				})
-				.OnSelectionChanged_Lambda([this, ChildIndex](const TSharedPtr<FString> SelectedType, ESelectInfo::Type)
-				{
-					if (!SelectedType.IsValid())
-					{
-						return;
-					}
-					SetChildType(ChildIndex, *SelectedType);
-				})
+				+ SHorizontalBox::Slot()
+				.FillWidth(1.0f)
+				.VAlign(VAlign_Center)
 				[
 					SNew(STextBlock)
+					.Text(FText::FromString(ChildEntries[ChildIndex].ActorName))
+				]
+
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.Padding(0.0f, 0.0f, 8.0f, 0.0f)
+				.HAlign(HAlign_Right)
+				.VAlign(VAlign_Center)
+				[
+					SNew(SComboBox<TSharedPtr<FString>>)
+					.OptionsSource(&ChildTypeItems)
+					.OnGenerateWidget_Lambda([](const TSharedPtr<FString> Item)
+					{
+						return SNew(STextBlock).Text(FText::FromString(Item.IsValid() ? *Item : TEXT("")));
+					})
+					.OnSelectionChanged_Lambda([this, ChildIndex](const TSharedPtr<FString> SelectedType, ESelectInfo::Type)
+					{
+						if (!SelectedType.IsValid())
+						{
+							return;
+						}
+						SetChildType(ChildIndex, *SelectedType);
+					})
+					[
+						SNew(STextBlock)
+						.Text_Lambda([this, ChildIndex]()
+						{
+							if (!ChildEntries.IsValidIndex(ChildIndex))
+							{
+								return FText::FromString(TEXT("static"));
+							}
+							return FText::FromString(MasterChildActorTypeToUiString(ChildEntries[ChildIndex].ActorType));
+						})
+					]
+				]
+
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				[
+					SNew(SButton)
 					.Text_Lambda([this, ChildIndex]()
 					{
-						if (!ChildEntries.IsValidIndex(ChildIndex))
-						{
-							return FText::FromString(TEXT("static"));
-						}
-						return FText::FromString(MasterChildActorTypeToUiString(ChildEntries[ChildIndex].ActorType));
+						return FText::FromString(IsChildIsolated(ChildIndex) ? TEXT("Restore") : TEXT("Show"));
+					})
+					.OnClicked_Lambda([this, ChildIndex]()
+					{
+						return ToggleChildVisibility(ChildIndex);
 					})
 				]
 			]
 
-			+ SHorizontalBox::Slot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 6.0f, 0.0f, 0.0f)
 			[
-				SNew(SButton)
-				.Text_Lambda([this, ChildIndex]()
-				{
-					return FText::FromString(IsChildIsolated(ChildIndex) ? TEXT("Restore") : TEXT("Show"));
-				})
-				.OnClicked_Lambda([this, ChildIndex]()
-				{
-					return ToggleChildVisibility(ChildIndex);
-				})
+				SNew(SBorder)
+				.Visibility(ChildIndex + 1 < ChildEntries.Num() ? EVisibility::Visible : EVisibility::Collapsed)
+				.BorderImage(FCoreStyle::Get().GetBrush("WhiteBrush"))
+				.BorderBackgroundColor(FLinearColor(0.25f, 0.25f, 0.25f, 0.7f))
+				.Padding(FMargin(0.0f, 0.5f))
 			]
 		];
 	}

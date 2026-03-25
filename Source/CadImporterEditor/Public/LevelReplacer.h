@@ -10,6 +10,7 @@ struct FCadLevelReplaceResult
 	FString MasterActorPath;
 	FString SpawnedActorPath;
 	int32 SpawnedChildActorCount = 0;
+	int32 PreservedChildActorCount = 0;
 	int32 DeletedActorCount = 0;
 	bool bUsedTransaction = false;
 };

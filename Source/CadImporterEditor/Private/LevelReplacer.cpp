@@ -9,6 +9,11 @@
 
 namespace
 {
+	FString NormalizeActorName(const FString& ActorName)
+	{
+		return ActorName.TrimStartAndEnd();
+	}
+
 	FString ExtractActorNameFromPath(const FString& ActorPath)
 	{
 		if (ActorPath.IsEmpty())
@@ -25,6 +30,22 @@ namespace
 		return (SeparatorIndex != INDEX_NONE && SeparatorIndex + 1 < ActorPath.Len())
 			? ActorPath.Mid(SeparatorIndex + 1)
 			: ActorPath;
+	}
+
+	bool DoesActorMatchChildEntry(const AActor* Actor, const FCadChildEntry& ChildEntry)
+	{
+		if (!Actor)
+		{
+			return false;
+		}
+
+		const FString EntryActorName = NormalizeActorName(ChildEntry.ActorName);
+		if (!EntryActorName.IsEmpty() && (Actor->GetActorNameOrLabel() == EntryActorName || Actor->GetName() == EntryActorName))
+		{
+			return true;
+		}
+
+		return !ChildEntry.ActorPath.IsEmpty() && Actor->GetPathName() == ChildEntry.ActorPath;
 	}
 
 	AActor* FindMasterActorInEditorWorld(const FString& MasterActorPath)
@@ -68,7 +89,7 @@ namespace
 		return nullptr;
 	}
 
-	void CollectMasterHierarchyActors(AActor* RootActor, TArray<AActor*>& OutActors)
+	void CollectActorHierarchyActors(AActor* RootActor, TArray<AActor*>& OutActors)
 	{
 		OutActors.Reset();
 		if (!RootActor)
@@ -104,6 +125,63 @@ namespace
 
 			return ComputeDepth(Left) > ComputeDepth(Right);
 		});
+	}
+
+	void CollectDirectAttachedChildren(AActor* RootActor, TArray<AActor*>& OutChildren)
+	{
+		OutChildren.Reset();
+		if (!RootActor)
+		{
+			return;
+		}
+
+		RootActor->GetAttachedActors(OutChildren, true, false);
+	}
+
+	void RemoveActorSubtreeFromDeleteList(AActor* RootActor, TArray<AActor*>& InOutActorsToDelete)
+	{
+		if (!RootActor)
+		{
+			return;
+		}
+
+		TArray<AActor*> PreservedActors;
+		CollectActorHierarchyActors(RootActor, PreservedActors);
+		InOutActorsToDelete.RemoveAll([&PreservedActors](AActor* Candidate)
+		{
+			return Candidate && PreservedActors.Contains(Candidate);
+		});
+	}
+
+	void CollectPreservedDirectChildren(
+		AActor* MasterActor,
+		const FCadMasterDoc& MasterDocument,
+		TArray<AActor*>& OutPreservedChildren)
+	{
+		OutPreservedChildren.Reset();
+		if (!MasterActor)
+		{
+			return;
+		}
+
+		TArray<AActor*> DirectChildren;
+		CollectDirectAttachedChildren(MasterActor, DirectChildren);
+		for (AActor* DirectChild : DirectChildren)
+		{
+			if (!DirectChild)
+			{
+				continue;
+			}
+
+			const bool bWillBeGenerated = MasterDocument.Children.ContainsByPredicate([DirectChild](const FCadChildEntry& ChildEntry)
+			{
+				return DoesActorMatchChildEntry(DirectChild, ChildEntry);
+			});
+			if (!bWillBeGenerated)
+			{
+				OutPreservedChildren.Add(DirectChild);
+			}
+		}
 	}
 }
 
@@ -146,11 +224,18 @@ namespace CadLevelReplacer
 		}
 
 		TArray<AActor*> ActorsToDelete;
-		CollectMasterHierarchyActors(MasterActor, ActorsToDelete);
+		CollectActorHierarchyActors(MasterActor, ActorsToDelete);
 		if (ActorsToDelete.Num() == 0)
 		{
 			OutError = TEXT("No level actors were found for replacement.");
 			return false;
+		}
+
+		TArray<AActor*> PreservedDirectChildren;
+		CollectPreservedDirectChildren(MasterActor, MasterDocument, PreservedDirectChildren);
+		for (AActor* PreservedChild : PreservedDirectChildren)
+		{
+			RemoveActorSubtreeFromDeleteList(PreservedChild, ActorsToDelete);
 		}
 
 		for (const FCadChildEntry& ChildEntry : MasterDocument.Children)
@@ -170,6 +255,7 @@ namespace CadLevelReplacer
 			}
 		}
 
+		AActor* const MasterParentActor = MasterActor->GetAttachParentActor();
 		FScopedTransaction Transaction(
 			TEXT("CadImporterEditor"),
 			FText::FromString(TEXT("CAD Master Workflow Replace Level Actors")),
@@ -180,11 +266,22 @@ namespace CadLevelReplacer
 			CurrentLevel->Modify();
 		}
 		MasterActor->Modify();
+		if (MasterParentActor)
+		{
+			MasterParentActor->Modify();
+		}
 		for (AActor* ActorToDelete : ActorsToDelete)
 		{
 			if (ActorToDelete)
 			{
 				ActorToDelete->Modify();
+			}
+		}
+		for (AActor* PreservedChild : PreservedDirectChildren)
+		{
+			if (PreservedChild)
+			{
+				PreservedChild->Modify();
 			}
 		}
 
@@ -240,6 +337,27 @@ namespace CadLevelReplacer
 			++SpawnedChildActorCount;
 		}
 
+		int32 PreservedChildActorCount = 0;
+		for (AActor* PreservedChild : PreservedDirectChildren)
+		{
+			if (!PreservedChild)
+			{
+				continue;
+			}
+
+			const bool bReparented = MasterParentActor
+				? PreservedChild->AttachToActor(MasterParentActor, FAttachmentTransformRules::KeepWorldTransform)
+				: (PreservedChild->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform), true);
+			if (!bReparented)
+			{
+				Transaction.Cancel();
+				OutError = FString::Printf(TEXT("Failed to preserve excluded child actor during replacement: %s"), *PreservedChild->GetPathName());
+				return false;
+			}
+
+			++PreservedChildActorCount;
+		}
+
 		int32 DeletedActorCount = 0;
 		for (AActor* ActorToDelete : ActorsToDelete)
 		{
@@ -264,16 +382,18 @@ namespace CadLevelReplacer
 		OutResult.MasterActorPath = MasterDocument.MasterActorPath;
 		OutResult.SpawnedActorPath = SpawnedMasterActor->GetPathName();
 		OutResult.SpawnedChildActorCount = SpawnedChildActorCount;
+		OutResult.PreservedChildActorCount = PreservedChildActorCount;
 		OutResult.DeletedActorCount = DeletedActorCount;
 		OutResult.bUsedTransaction = GEditor->CanTransact();
 
 		UE_LOG(
 			LogCadImporter,
 			Display,
-			TEXT("Master workflow replacement complete. master=%s spawned_master=%s spawned_children=%d deleted=%d"),
+			TEXT("Master workflow replacement complete. master=%s spawned_master=%s spawned_children=%d preserved=%d deleted=%d"),
 			*OutResult.MasterActorPath,
 			*OutResult.SpawnedActorPath,
 			OutResult.SpawnedChildActorCount,
+			OutResult.PreservedChildActorCount,
 			OutResult.DeletedActorCount);
 		return true;
 	}
