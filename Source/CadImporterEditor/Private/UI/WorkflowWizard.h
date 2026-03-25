@@ -120,5 +120,4 @@ private:
 	FCadMasterJsonGenerationResult MasterJsonResult;
 	FCadChildJsonResult ChildJsonResult;
 	FCadWorkflowBuildInput BuildInput;
-	FCadFbxImportOptions ImportOptions;
 };

@@ -1,12 +1,8 @@
 #include "ImportService.h"
 
 #include "CadImporterEditor.h"
-#include "DesktopPlatformModule.h"
 #include "Engine/Blueprint.h"
-#include "Framework/Application/SlateApplication.h"
-#include "IDesktopPlatform.h"
 #include "Import/ImportExecutor.h"
-#include "Import/ImportModelParser.h"
 #include "ChildDocExporter.h"
 #include "ChildDocParser.h"
 #include "LevelReplacer.h"
@@ -29,78 +25,10 @@ namespace
 		ShowErrorDialog(DialogTitle, Error);
 		return false;
 	}
-
-	bool SelectJsonPath(
-		const bool bSaveDialog,
-		const FString& Title,
-		const FString& DefaultFile,
-		FString& OutJsonPath)
-	{
-		IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
-		if (!DesktopPlatform)
-		{
-			UE_LOG(LogCadImporter, Error, TEXT("Desktop platform module is not available."));
-			return false;
-		}
-
-		const void* ParentWindowHandle = nullptr;
-		if (FSlateApplication::IsInitialized())
-		{
-			ParentWindowHandle = FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr);
-		}
-
-		TArray<FString> OutFiles;
-		const FString DefaultPath = FPaths::ProjectDir();
-		const FString FileTypes = TEXT("JSON Files (*.json)|*.json");
-		const bool bOpened = bSaveDialog
-			? DesktopPlatform->SaveFileDialog(
-				const_cast<void*>(ParentWindowHandle),
-				Title,
-				DefaultPath,
-				DefaultFile,
-				FileTypes,
-				EFileDialogFlags::None,
-				OutFiles)
-			: DesktopPlatform->OpenFileDialog(
-				const_cast<void*>(ParentWindowHandle),
-				Title,
-				DefaultPath,
-				DefaultFile,
-				FileTypes,
-				EFileDialogFlags::None,
-				OutFiles);
-
-		if (!bOpened || OutFiles.Num() == 0)
-		{
-			return false;
-		}
-
-		OutJsonPath = OutFiles[0];
-		return true;
-	}
-}
-
-bool FCadImportService::RunImport(const FString& JsonPath, const FCadFbxImportOptions& ImportOptions) const
-{
-	FCadImportModel Model;
-	FString Error;
-	FCadJsonParser Parser;
-	if (!Parser.ParseFromFile(JsonPath, Model, Error))
-	{
-		return ReportFailure(TEXT("CAD json parse failed"), TEXT("JSON parse failed"), Error);
-	}
-
-	if (!CadImportExecutor::TryImportModel(Model, JsonPath, ImportOptions, nullptr, Error))
-	{
-		return ReportFailure(TEXT("CAD import failed"), TEXT("Import failed"), Error);
-	}
-
-	return true;
 }
 
 bool FCadImportService::BuildFromWorkflow(
 	const FCadWorkflowBuildInput& BuildInput,
-	const FCadFbxImportOptions& ImportOptions,
 	FCadLevelReplaceResult* OutReplaceResult) const
 {
 	if (OutReplaceResult)
@@ -180,11 +108,11 @@ bool FCadImportService::BuildFromWorkflow(
 		}
 
 		UBlueprint* ChildBlueprint = nullptr;
-		if (!CadImportExecutor::TryImportModel(ChildModel, ChildJsonPath, ImportOptions, &ChildBlueprint, Error))
+		if (!CadImportExecutor::TryImportModel(ChildModel, ChildJsonPath, &ChildBlueprint, Error))
 		{
 			return ReportFailure(
-				TEXT("Child blueprint import failed"),
-				FString::Printf(TEXT("Child blueprint import failed for '%s'"), *ChildName),
+				TEXT("Child blueprint build failed"),
+				FString::Printf(TEXT("Child blueprint build failed for '%s'"), *ChildName),
 				Error);
 		}
 
@@ -220,14 +148,4 @@ bool FCadImportService::BuildFromWorkflow(
 	}
 
 	return true;
-}
-
-bool FCadImportService::SelectJsonFile(FString& OutJsonPath) const
-{
-	return SelectJsonPath(false, TEXT("Select CAD JSON"), TEXT(""), OutJsonPath);
-}
-
-bool FCadImportService::SelectJsonSavePath(FString& OutJsonPath) const
-{
-	return SelectJsonPath(true, TEXT("Save CAD JSON"), TEXT("ActorExport.json"), OutJsonPath);
 }

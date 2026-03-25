@@ -302,8 +302,6 @@ void SCadWorkflowWizard::Construct(const FArguments& InArgs)
 	JointTypeItems.Add(MakeShared<FString>(TEXT("fixed")));
 	JointTypeItems.Add(MakeShared<FString>(TEXT("revolute")));
 	JointTypeItems.Add(MakeShared<FString>(TEXT("prismatic")));
-	ImportOptions = FCadFbxImportOptions();
-	ImportOptions.bShowDialog = false;
 	SelectionKey.Reset();
 	LastBuildReplaceResult = FCadLevelReplaceResult();
 	bCanRevertLastBuild = false;
@@ -2706,7 +2704,7 @@ FReply SCadWorkflowWizard::BuildAssembly()
 	}
 
 	FCadLevelReplaceResult ReplaceResult;
-	if (!Runner->BuildFromWorkflow(BuildInput, ImportOptions, &ReplaceResult))
+	if (!Runner->BuildFromWorkflow(BuildInput, &ReplaceResult))
 	{
 		LastBuildReplaceResult = FCadLevelReplaceResult();
 		bCanRevertLastBuild = false;

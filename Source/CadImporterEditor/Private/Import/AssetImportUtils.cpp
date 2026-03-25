@@ -1,8 +1,5 @@
 #include "Import/AssetImportUtils.h"
 
-#include "AssetImportTask.h"
-#include "Engine/StaticMesh.h"
-#include "Misc/Paths.h"
 #include "Misc/PackageName.h"
 
 namespace CadAssetImportUtils
@@ -13,12 +10,6 @@ namespace CadAssetImportUtils
 		NormalizedPath.TrimStartAndEndInline();
 		NormalizedPath.ReplaceInline(TEXT("\\"), TEXT("/"));
 		return NormalizedPath;
-	}
-
-	bool IsFbxMeshSourcePath(const FString& RawMeshPath)
-	{
-		const FString NormalizedPath = NormalizeMeshSourcePath(RawMeshPath);
-		return FPaths::GetExtension(NormalizedPath).Equals(TEXT("fbx"), ESearchCase::IgnoreCase);
 	}
 
 	FString NormalizeExistingAssetPackagePath(const FString& RawAssetPath)
@@ -59,53 +50,5 @@ namespace CadAssetImportUtils
 	FString ObjectPathToPackagePath(const FString& ObjectPath)
 	{
 		return NormalizeExistingAssetPackagePath(ObjectPath);
-	}
-
-	FString ResolveMeshAbsolutePath(const FCadImportModel& Model, const FString& RawMeshPath)
-	{
-		FString NormalizedPath = NormalizeMeshSourcePath(RawMeshPath);
-
-		if (NormalizedPath.StartsWith(TEXT("/")) && !NormalizedPath.StartsWith(TEXT("//")) && !NormalizedPath.Contains(TEXT(":")))
-		{
-			NormalizedPath.RightChopInline(1, EAllowShrinking::No);
-		}
-
-		if (FPaths::GetExtension(NormalizedPath).IsEmpty())
-		{
-			NormalizedPath += TEXT(".fbx");
-		}
-
-		if (FPaths::IsRelative(NormalizedPath))
-		{
-			return FPaths::ConvertRelativePathToFull(FPaths::Combine(Model.SourceDirectory, NormalizedPath));
-		}
-
-		return FPaths::ConvertRelativePathToFull(NormalizedPath);
-	}
-
-	FString GetFirstImportedStaticMeshPath(UAssetImportTask* ImportTask)
-	{
-		if (!ImportTask)
-		{
-			return FString();
-		}
-
-		for (UObject* ImportedObject : ImportTask->GetObjects())
-		{
-			if (const UStaticMesh* StaticMesh = Cast<UStaticMesh>(ImportedObject))
-			{
-				return StaticMesh->GetOutermost()->GetName();
-			}
-		}
-
-		for (const FString& ImportedPath : ImportTask->ImportedObjectPaths)
-		{
-			if (LoadObject<UStaticMesh>(nullptr, *ImportedPath) != nullptr)
-			{
-				return ObjectPathToPackagePath(ImportedPath);
-			}
-		}
-
-		return FString();
 	}
 }

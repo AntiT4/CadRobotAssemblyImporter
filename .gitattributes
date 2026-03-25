@@ -1,0 +1,13 @@
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.uasset binary
+*.umap binary
+*.exe binary
+*.dll binary
+*.lib binary
+*.pdb binary
