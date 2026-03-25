@@ -14,6 +14,8 @@ namespace
 	{
 		switch (ActorType)
 		{
+		case ECadMasterChildActorType::None:
+			return FString();
 		case ECadMasterChildActorType::Movable:
 			return TEXT("movable");
 		case ECadMasterChildActorType::Static:
@@ -55,7 +57,10 @@ namespace
 	{
 		TSharedPtr<FJsonObject> ChildObject = MakeShared<FJsonObject>();
 		ChildObject->SetStringField(TEXT("actor_name"), ChildEntry.ActorName);
-		ChildObject->SetStringField(TEXT("actor_type"), ToMasterChildTypeString(ChildEntry.ActorType));
+		if (CadMasterChildActorTypeShouldGenerateJson(ChildEntry.ActorType))
+		{
+			ChildObject->SetStringField(TEXT("actor_type"), ToMasterChildTypeString(ChildEntry.ActorType));
+		}
 		ChildObject->SetStringField(TEXT("child_json_file_name"), ChildEntry.ChildJsonFileName);
 		ChildObject->SetObjectField(TEXT("relative_transform"), MakeMasterWorkflowTransformObject(ChildEntry.RelativeTransform));
 		return ChildObject;
@@ -74,6 +79,11 @@ namespace
 		TArray<TSharedPtr<FJsonValue>> ChildValues;
 		for (const FCadChildEntry& ChildEntry : Document.Children)
 		{
+			if (!CadMasterChildActorTypeShouldGenerateJson(ChildEntry.ActorType))
+			{
+				continue;
+			}
+
 			ChildValues.Add(MakeShared<FJsonValueObject>(MakeMasterChildObject(ChildEntry)));
 		}
 		RootObject->SetArrayField(TEXT("children"), ChildValues);

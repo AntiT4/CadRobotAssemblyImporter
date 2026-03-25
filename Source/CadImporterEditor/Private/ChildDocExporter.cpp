@@ -18,6 +18,8 @@ namespace
 	{
 		switch (ActorType)
 		{
+		case ECadMasterChildActorType::None:
+			return FString();
 		case ECadMasterChildActorType::Movable:
 			return TEXT("movable");
 		case ECadMasterChildActorType::Static:
@@ -225,7 +227,10 @@ namespace
 		RootObject->SetStringField(TEXT("master_name"), ChildDocument.MasterName);
 		RootObject->SetStringField(TEXT("child_actor_name"), ChildDocument.ChildActorName);
 		RootObject->SetStringField(TEXT("source_actor_path"), ChildDocument.SourceActorPath);
-		RootObject->SetStringField(TEXT("actor_type"), MasterChildTypeToString(ChildDocument.ActorType));
+		if (CadMasterChildActorTypeShouldGenerateJson(ChildDocument.ActorType))
+		{
+			RootObject->SetStringField(TEXT("actor_type"), MasterChildTypeToString(ChildDocument.ActorType));
+		}
 		RootObject->SetObjectField(TEXT("relative_transform"), CadJsonTransformUtils::MakeTransformObject(ChildDocument.RelativeTransform));
 
 		TSharedPtr<FJsonObject> PhysicsObject = MakeShared<FJsonObject>();
@@ -459,6 +464,11 @@ namespace CadChildDocExporter
 		TArray<FString> GeneratedChildJsonPaths;
 		for (const FCadChildEntry& ChildEntry : MasterDocument.Children)
 		{
+			if (!CadMasterChildActorTypeShouldGenerateJson(ChildEntry.ActorType))
+			{
+				continue;
+			}
+
 			AActor* ChildRootActor = CadActorHierarchyUtils::FindByPath(ChildEntry.ActorPath);
 			FCadChildDoc ChildDocument = BuildChildDocumentTemplate(MasterDocument, ChildEntry, ChildRootActor);
 

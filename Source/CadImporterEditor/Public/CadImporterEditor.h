@@ -7,6 +7,8 @@
 #include "Modules/ModuleManager.h"
 
 class FCadImportService;
+class SDockTab;
+class FSpawnTabArgs;
 
 class FCadImporterEditorModule : public IModuleInterface
 {
@@ -18,7 +20,8 @@ public:
 	
 private:
 	void RegisterMenus();
-	void OpenWorkflowWindow();
+	void OpenWorkflowTab();
+	TSharedRef<SDockTab> SpawnWorkflowTab(const FSpawnTabArgs& Args);
 
 private:
 	TSharedPtr<FCadImportService> ImportService;

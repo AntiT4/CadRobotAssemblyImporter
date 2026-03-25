@@ -25,11 +25,26 @@ namespace
 {
 	FString MasterChildActorTypeToUiString(const ECadMasterChildActorType ActorType)
 	{
-		return ActorType == ECadMasterChildActorType::Movable ? TEXT("movable") : TEXT("static");
+		switch (ActorType)
+		{
+		case ECadMasterChildActorType::None:
+			return TEXT("none");
+		case ECadMasterChildActorType::Movable:
+			return TEXT("movable");
+		case ECadMasterChildActorType::Static:
+		default:
+			return TEXT("static");
+		}
 	}
 
 	bool TryParseMasterChildActorTypeFromUiString(const FString& RawType, ECadMasterChildActorType& OutType)
 	{
+		if (RawType.Equals(TEXT("none"), ESearchCase::IgnoreCase))
+		{
+			OutType = ECadMasterChildActorType::None;
+			return true;
+		}
+
 		if (RawType.Equals(TEXT("movable"), ESearchCase::IgnoreCase))
 		{
 			OutType = ECadMasterChildActorType::Movable;
@@ -57,6 +72,7 @@ void SCadWorkflowWizard::Construct(const FArguments& InArgs)
 	ChildTypeItems.Reset();
 	ChildTypeItems.Add(MakeShared<FString>(TEXT("static")));
 	ChildTypeItems.Add(MakeShared<FString>(TEXT("movable")));
+	ChildTypeItems.Add(MakeShared<FString>(TEXT("none")));
 	ImportOptions = FCadFbxImportOptions();
 	ImportOptions.bShowDialog = false;
 	SelectionKey.Reset();
@@ -229,7 +245,7 @@ void SCadWorkflowWizard::Construct(const FArguments& InArgs)
 					.Padding(0.0f, 0.0f, 0.0f, 8.0f)
 					[
 						SNew(STextBlock)
-						.Text(FText::FromString(TEXT("Set child actor types in UI, then generate master/child json files.")))
+						.Text(FText::FromString(TEXT("Set child actor types in UI, then generate master/child json files. Choose 'none' to exclude a child.")))
 					]
 
 					+ SVerticalBox::Slot()
@@ -752,7 +768,7 @@ FReply SCadWorkflowWizard::ConfirmMaster()
 	const AActor* ConfirmedMasterActor = ConfirmedSelection.MasterActor.Get();
 	SetStep(2);
 	SetStatus(FString::Printf(
-		TEXT("Master actor confirmed.\nmaster=%s\nchildren=%d\n다음 단계에서 child actor_type을 선택 후 Generate JSON을 실행하세요."),
+		TEXT("Master actor confirmed.\nmaster=%s\nchildren=%d\n다음 단계에서 child actor_type을 선택 후 Generate JSON을 실행하세요. 'none'은 JSON 생성에서 제외합니다."),
 		ConfirmedMasterActor ? *ConfirmedMasterActor->GetActorNameOrLabel() : TEXT("(none)"),
 		ChildEntries.Num()));
 	return FReply::Handled();
@@ -787,7 +803,20 @@ FReply SCadWorkflowWizard::GenerateWorkflowJson()
 	}
 
 	FCadMasterSelection SelectionForGeneration = ConfirmedSelection;
-	SelectionForGeneration.Children = ChildEntries;
+	SelectionForGeneration.Children.Reset();
+	for (const FCadChildEntry& ChildEntry : ChildEntries)
+	{
+		if (CadMasterChildActorTypeShouldGenerateJson(ChildEntry.ActorType))
+		{
+			SelectionForGeneration.Children.Add(ChildEntry);
+		}
+	}
+
+	if (SelectionForGeneration.Children.Num() == 0)
+	{
+		SetStatus(TEXT("Generate JSON failed: all children are set to 'none'. Select at least one 'static' or 'movable' child."));
+		return FReply::Handled();
+	}
 
 	FString Error;
 	if (!CadMasterDocExporter::TryGenerateAndWriteFromSelectionResult(SelectionForGeneration, WorkspaceFolder, MasterJsonResult, Error))

@@ -5,9 +5,15 @@
 
 enum class ECadMasterChildActorType : uint8
 {
+	None,
 	Static,
 	Movable
 };
+
+inline bool CadMasterChildActorTypeShouldGenerateJson(const ECadMasterChildActorType ActorType)
+{
+	return ActorType != ECadMasterChildActorType::None;
+}
 
 struct FCadChildEntry
 {
