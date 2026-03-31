@@ -43,6 +43,7 @@ public class CadImporterEditor : ModuleRules
 				"DesktopPlatform",
 				"EditorFramework",
 				"UnrealEd",
+				"StaticMeshEditor",
 				"ToolMenus",
 				"CoreUObject",
 				"Engine",

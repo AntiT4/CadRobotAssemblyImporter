@@ -94,6 +94,7 @@ bool FCadImportService::BuildFromWorkflow(
 
 		FCadImportModel ChildModel;
 		if (!CadChildImportModelBuilder::TryBuildImportModel(
+			MasterDocument,
 			ChildEntry,
 			ChildDocument,
 			ResolvedBuildInput.ChildJsonFolderPath,

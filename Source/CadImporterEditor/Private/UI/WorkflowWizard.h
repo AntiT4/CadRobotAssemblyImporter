@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Editor/ActorHierarchyUtils.h"
 #include "LevelReplacer.h"
 #include "MasterSelectionCollector.h"
 #include "ChildDocExporter.h"
@@ -47,6 +48,10 @@ private:
 
 	EActiveTimerReturnType PollSelection(double CurrentTime, float DeltaTime);
 	void RefreshSelectionPreview();
+	void RebuildSelectionBranchRows();
+	void RefreshFlattenBranchCandidates();
+	void RebuildFlattenRows();
+	void RebuildChildEntriesFromFlattenPreview();
 	void RebuildChildRows();
 	void RebuildJointEditorRows();
 	void LoadEditableJointDocuments(const FCadMasterSelection& SelectionForGeneration, const TArray<FCadChildDoc>& InChildDocuments);
@@ -73,6 +78,9 @@ private:
 	void SetJointLimitUpper(const int32 ChildDocIndex, const int32 JointIndex, const float Value);
 	void SetJointLimitEffort(const int32 ChildDocIndex, const int32 JointIndex, const float Value);
 	void SetJointLimitVelocity(const int32 ChildDocIndex, const int32 JointIndex, const float Value);
+	void PreviewFlattenChild(const int32 ChildIndex);
+	bool ApplyPendingFlattenPreview(FString& OutError);
+	void SetFlattenBranchSelected(const int32 BranchIndex, const bool bSelected);
 	void SetChildType(const int32 ChildIndex, const FString& SelectedType);
 	void SaveChildVisibility();
 	void IsolateChildVisibility(const int32 ChildIndex);
@@ -84,6 +92,8 @@ private:
 	FReply HandleApplyWorkspace();
 	FReply HandleBack();
 	FReply ConfirmMaster();
+	FReply ApplyFlattenAndContinue();
+	FReply ResetFlattenPreview();
 	FReply ProceedToJointSetup();
 	FReply GenerateWorkflowJson();
 	FReply ContinueFromJointSetupPreview();
@@ -96,12 +106,16 @@ private:
 
 	TSharedPtr<FCadImportService> Runner;
 	TSharedPtr<SEditableTextBox> WorkspaceTextBox;
+	TSharedPtr<SVerticalBox> SelectionBranchRowsBox;
+	TSharedPtr<SVerticalBox> FlattenRowsBox;
 	TSharedPtr<SVerticalBox> ChildTypeRowsBox;
 	TSharedPtr<SVerticalBox> JointEditorRowsBox;
 
 	FString WorkspaceFolder;
 	FString StatusMessage;
 	FString SelectionPreviewText;
+	TArray<FCadHierarchyBranchStats> SelectionBranchStats;
+	FString FlattenPreviewText;
 	FString MovableJointPreviewText;
 	FString DryRunPreviewFolderPath;
 	FString SelectionKey;
@@ -109,6 +123,12 @@ private:
 	TArray<TSharedPtr<FString>> ChildTypeItems;
 	TArray<TSharedPtr<FString>> JointTypeItems;
 	FCadMasterSelection ConfirmedSelection;
+	TArray<FCadChildEntry> BaseChildEntries;
+	TArray<FCadHierarchyBranchStats> FlattenBranchStats;
+	TArray<bool> FlattenBranchSelections;
+	TSet<FString> PendingFlattenBranchPaths;
+	TSet<FString> FlattenableChildActorPaths;
+	TSet<FString> PreviewPromotedChildActorPaths;
 	TArray<FCadChildEntry> ChildEntries;
 	TArray<FEditableJointChildState> EditableJointChildren;
 	TMap<FString, bool> SavedVisibility;

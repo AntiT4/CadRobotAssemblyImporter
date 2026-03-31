@@ -47,55 +47,6 @@ namespace
 		return Actor ? Actor->GetActorNameOrLabel() : TEXT("(none)");
 	}
 
-	void BuildMovableChildHierarchyRecursive(
-		AActor* CurrentActor,
-		AActor* ParentActor,
-		AActor* RootActor,
-		const FTransform& RootRelativeTransform,
-		FCadChildDoc& InOutChildDocument)
-	{
-		if (!CurrentActor)
-		{
-			return;
-		}
-
-		const FString CurrentLinkName = GetActorDisplayNameForExtractor(CurrentActor);
-		const bool bIsRootActor = (CurrentActor == RootActor);
-		if (!bIsRootActor)
-		{
-			FCadChildLinkDef LinkTemplate;
-			LinkTemplate.LinkName = CurrentLinkName;
-			LinkTemplate.RelativeTransform = (ParentActor == RootActor)
-				? CurrentActor->GetActorTransform().GetRelativeTransform(RootActor->GetActorTransform())
-				: CurrentActor->GetActorTransform().GetRelativeTransform(ParentActor->GetActorTransform());
-			CadChildVisualCollector::CollectRootLinkVisuals(CurrentActor, LinkTemplate.Visuals);
-			InOutChildDocument.Links.Add(MoveTemp(LinkTemplate));
-
-			FCadChildJointDef JointTemplate;
-			const FString ParentLinkName = (ParentActor == RootActor) ? FString() : GetActorDisplayNameForExtractor(ParentActor);
-			JointTemplate.JointName = ParentLinkName.TrimStartAndEnd().IsEmpty()
-				? FString::Printf(TEXT("world_to_%s"), *CurrentLinkName)
-				: FString::Printf(TEXT("%s_to_%s"), *ParentLinkName, *CurrentLinkName);
-			JointTemplate.JointType = ECadImportJointType::Fixed;
-			JointTemplate.ParentActorName = ParentLinkName;
-			JointTemplate.ChildActorName = CurrentLinkName;
-			JointTemplate.Axis = FVector::UpVector;
-			InOutChildDocument.Joints.Add(MoveTemp(JointTemplate));
-		}
-
-		TArray<AActor*> Children;
-		CadActorHierarchyUtils::GetSortedAttachedChildren(CurrentActor, Children, false);
-		for (AActor* ChildActor : Children)
-		{
-			if (ChildActor && ChildActor->IsA<AStaticMeshActor>())
-			{
-				continue;
-			}
-
-			BuildMovableChildHierarchyRecursive(ChildActor, CurrentActor, RootActor, RootRelativeTransform, InOutChildDocument);
-		}
-	}
-
 	void BuildMovableChildTemplate(
 		const FCadChildEntry& ChildEntry,
 		AActor* ChildRootActor,
@@ -106,7 +57,31 @@ namespace
 			return;
 		}
 
-		BuildMovableChildHierarchyRecursive(ChildRootActor, nullptr, ChildRootActor, ChildEntry.RelativeTransform, InOutChildDocument);
+		TArray<AActor*> DirectChildren;
+		CadActorHierarchyUtils::GetSortedAttachedChildren(ChildRootActor, DirectChildren, false);
+		for (AActor* DirectChildActor : DirectChildren)
+		{
+			if (!DirectChildActor || DirectChildActor->IsA<AStaticMeshActor>())
+			{
+				continue;
+			}
+
+			const FString LinkName = GetActorDisplayNameForExtractor(DirectChildActor);
+
+			FCadChildLinkDef LinkTemplate;
+			LinkTemplate.LinkName = LinkName;
+			LinkTemplate.RelativeTransform = DirectChildActor->GetActorTransform().GetRelativeTransform(ChildRootActor->GetActorTransform());
+			CadChildVisualCollector::CollectRootLinkVisuals(DirectChildActor, LinkTemplate.Visuals);
+			InOutChildDocument.Links.Add(MoveTemp(LinkTemplate));
+
+			FCadChildJointDef JointTemplate;
+			JointTemplate.JointName = FString::Printf(TEXT("world_to_%s"), *LinkName);
+			JointTemplate.JointType = ECadImportJointType::Fixed;
+			JointTemplate.ParentActorName = FString();
+			JointTemplate.ChildActorName = LinkName;
+			JointTemplate.Axis = FVector::UpVector;
+			InOutChildDocument.Joints.Add(MoveTemp(JointTemplate));
+		}
 	}
 
 	TSharedPtr<FJsonObject> MakeJointTemplateObject(const FCadChildJointDef& Joint)

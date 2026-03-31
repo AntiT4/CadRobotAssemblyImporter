@@ -156,10 +156,12 @@ namespace CadChildVisualCollector
 		CadActorHierarchyUtils::GetSortedAttachedChildren(ChildRootActor, Children, false);
 		for (AActor* ChildActor : Children)
 		{
-			if (ChildActor && ChildActor->IsA<AStaticMeshActor>())
+			if (!ChildActor)
 			{
-				AbsorbStaticMeshActorSubtree(ChildRootActor, ChildActor, OutVisuals);
+				continue;
 			}
+
+			AppendSubtreeVisualsRelativeToRoot(ChildActor, ChildRootActor, OutVisuals);
 		}
 	}
 }

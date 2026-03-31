@@ -15,8 +15,10 @@
 #include "Framework/Application/SlateApplication.h"
 #include "HAL/PlatformFileManager.h"
 #include "IDesktopPlatform.h"
+#include "Misc/MessageDialog.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Styling/AppStyle.h"
 #include "DrawDebugHelpers.h"
 #include "Workflow/WorkspaceUtils.h"
 #include "Widgets/Images/SImage.h"
@@ -32,6 +34,7 @@
 #include "Widgets/Layout/SWidgetSwitcher.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
+#include "Widgets/Views/SHeaderRow.h"
 
 namespace
 {
@@ -134,6 +137,64 @@ namespace
 		return JointType == ECadImportJointType::Revolute || JointType == ECadImportJointType::Prismatic;
 	}
 
+	FString BoolToYesNoString(const bool bValue)
+	{
+		return bValue ? TEXT("yes") : TEXT("no");
+	}
+
+	int32 ComputeMaxDepthFromActor(AActor* RootActor)
+	{
+		if (!RootActor)
+		{
+			return 0;
+		}
+
+		TArray<AActor*> DirectChildren;
+		CadActorHierarchyUtils::GetSortedAttachedChildren(RootActor, DirectChildren, false);
+		int32 MaxDepth = 0;
+		for (AActor* ChildActor : DirectChildren)
+		{
+			MaxDepth = FMath::Max(MaxDepth, 1 + ComputeMaxDepthFromActor(ChildActor));
+		}
+
+		return MaxDepth;
+	}
+
+	FString BuildChildHierarchyInfoLabel(const FCadChildEntry& ChildEntry)
+	{
+		AActor* ChildActor = CadActorHierarchyUtils::FindByPath(ChildEntry.ActorPath);
+		TArray<AActor*> DirectChildren;
+		CadActorHierarchyUtils::GetSortedAttachedChildren(ChildActor, DirectChildren, false);
+		const int32 MaxDepth = ComputeMaxDepthFromActor(ChildActor);
+
+		return FString::Printf(
+			TEXT("direct=%d, depth=%d"),
+			DirectChildren.Num(),
+			MaxDepth);
+	}
+
+	FString BuildBranchDepthTableText(const TArray<FCadHierarchyBranchStats>& BranchStats)
+	{
+		if (BranchStats.Num() == 0)
+		{
+			return TEXT("Branch\tDepth\tDirect\tDesc\tNestedMesh\n(no direct child branches)");
+		}
+
+		FString Result = TEXT("Branch\tDepth\tDirect\tDesc\tNestedMesh");
+		for (const FCadHierarchyBranchStats& BranchStat : BranchStats)
+		{
+			Result += FString::Printf(
+				TEXT("\n%s\t%d\t%d\t%d\t%d"),
+				*BranchStat.BranchName,
+				BranchStat.MaxDepthFromRoot,
+				BranchStat.DirectChildCount,
+				BranchStat.DescendantCount,
+				BranchStat.NestedStaticMeshActorCount);
+		}
+
+		return Result;
+	}
+
 	FString BuildAutoJointName(const FCadChildJointDef& JointDef)
 	{
 		const FString ParentName = JointDef.ParentActorName.TrimStartAndEnd();
@@ -146,6 +207,63 @@ namespace
 		return ParentName.IsEmpty()
 			? FString::Printf(TEXT("World_to_%s"), *ChildName)
 			: FString::Printf(TEXT("%s_to_%s"), *ParentName, *ChildName);
+	}
+
+	void AppendFlattenPreviewEntriesRecursive(
+		const FCadChildEntry& SourceEntry,
+		AActor* MasterActor,
+		const TSet<FString>& PendingFlattenBranchPaths,
+		const TMap<FString, ECadMasterChildActorType>& ActorTypesByPath,
+		TArray<FCadChildEntry>& OutChildEntries,
+		TSet<FString>& OutPreviewPromotedChildActorPaths)
+	{
+		if (!PendingFlattenBranchPaths.Contains(SourceEntry.ActorPath))
+		{
+			FCadChildEntry ResolvedEntry = SourceEntry;
+			if (const ECadMasterChildActorType* ExistingType = ActorTypesByPath.Find(ResolvedEntry.ActorPath))
+			{
+				ResolvedEntry.ActorType = *ExistingType;
+			}
+
+			OutChildEntries.Add(MoveTemp(ResolvedEntry));
+			return;
+		}
+
+		AActor* BranchActor = CadActorHierarchyUtils::FindByPath(SourceEntry.ActorPath);
+		if (!BranchActor || !MasterActor)
+		{
+			return;
+		}
+
+		TArray<AActor*> PromotedActors;
+		CadActorHierarchyUtils::GetSortedAttachedChildren(BranchActor, PromotedActors, false);
+		for (AActor* PromotedActor : PromotedActors)
+		{
+			if (!PromotedActor)
+			{
+				continue;
+			}
+
+			FCadChildEntry PreviewEntry;
+			PreviewEntry.ActorName = PromotedActor->GetActorNameOrLabel();
+			PreviewEntry.ActorPath = PromotedActor->GetPathName();
+			PreviewEntry.RelativeTransform = PromotedActor->GetActorTransform().GetRelativeTransform(MasterActor->GetActorTransform());
+			PreviewEntry.ChildJsonFileName = FString::Printf(TEXT("%s.json"), *FPaths::MakeValidFileName(PreviewEntry.ActorName));
+			PreviewEntry.ActorType = SourceEntry.ActorType;
+			if (const ECadMasterChildActorType* ExistingType = ActorTypesByPath.Find(PreviewEntry.ActorPath))
+			{
+				PreviewEntry.ActorType = *ExistingType;
+			}
+
+			OutPreviewPromotedChildActorPaths.Add(PreviewEntry.ActorPath);
+			AppendFlattenPreviewEntriesRecursive(
+				PreviewEntry,
+				MasterActor,
+				PendingFlattenBranchPaths,
+				ActorTypesByPath,
+				OutChildEntries,
+				OutPreviewPromotedChildActorPaths);
+		}
 	}
 
 	FColor JointTypeToPreviewColor(const UCadImporterEditorUserSettings* Settings, const ECadImportJointType JointType)
@@ -376,9 +494,14 @@ namespace
 void SCadWorkflowWizard::Construct(const FArguments& InArgs)
 {
 	Runner = InArgs._Runner;
+#if UE_BUILD_DEVELOPMENT
+	WorkspaceFolder = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("MasterWorkspace")));
+#else
 	WorkspaceFolder = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir());
+#endif
 	StatusMessage = TEXT("Step 1: Set workspace folder.");
 	SelectionPreviewText = TEXT("선택된 액터 없음");
+	FlattenPreviewText = TEXT("Confirm master actor first.");
 	MovableJointPreviewText = TEXT("No movable child actors are ready for joint setup preview yet.");
 	DryRunPreviewFolderPath.Reset();
 	StepIndex = 0;
@@ -414,12 +537,13 @@ void SCadWorkflowWizard::Construct(const FArguments& InArgs)
 					{
 						TEXT("1/5 Workspace"),
 						TEXT("2/5 Confirm Master Actor"),
-						TEXT("3/5 Child Type"),
+						TEXT("3/5 Configure Children"),
+						TEXT("3/5 Configure Children"),
 						TEXT("4/5 Joint Setup + Generate JSON"),
 						TEXT("5/5 Build Actor"),
 						TEXT("Completed")
 					};
-					const int32 SafeIndex = FMath::Clamp(StepIndex, 0, 5);
+					const int32 SafeIndex = FMath::Clamp(StepIndex, 0, 6);
 					return FText::FromString(FString::Printf(TEXT("Master Workflow Wizard - %s"), Labels[SafeIndex]));
 				})
 			]
@@ -513,22 +637,54 @@ void SCadWorkflowWizard::Construct(const FArguments& InArgs)
 					.Padding(0.0f, 0.0f, 0.0f, 8.0f)
 					[
 						SNew(STextBlock)
-						.Text(FText::FromString(TEXT("선택 액터 / 직계 자손 (1초 간격 자동 갱신, 선택 변경시에만 자손 재검색)")))
+						.Text(FText::FromString(TEXT("선택 액터 / 직계 자식 브랜치 요약 (1초 간격 자동 갱신)")))
 					]
 
 					+ SVerticalBox::Slot()
 					.AutoHeight()
 					.Padding(0.0f, 0.0f, 0.0f, 8.0f)
 					[
-						SNew(SBox)
-						.MinDesiredHeight(120.0f)
+						SNew(STextBlock)
+						.Text_Lambda([this]()
+						{
+							return FText::FromString(SelectionPreviewText);
+						})
+					]
+
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(0.0f, 0.0f, 0.0f, 6.0f)
+					[
+						SNew(SHeaderRow)
+						+ SHeaderRow::Column(TEXT("SelBranchName"))
+						.FillWidth(0.55f)
+						.DefaultLabel(FText::FromString(TEXT("Branch")))
+						+ SHeaderRow::Column(TEXT("SelBranchDepth"))
+						.FixedWidth(70.0f)
+						.HAlignCell(HAlign_Center)
+						.DefaultLabel(FText::FromString(TEXT("Depth")))
+						+ SHeaderRow::Column(TEXT("SelBranchDirect"))
+						.FixedWidth(70.0f)
+						.HAlignCell(HAlign_Center)
+						.DefaultLabel(FText::FromString(TEXT("Direct")))
+						+ SHeaderRow::Column(TEXT("SelBranchDesc"))
+						.FixedWidth(70.0f)
+						.HAlignCell(HAlign_Center)
+						.DefaultLabel(FText::FromString(TEXT("Desc")))
+						+ SHeaderRow::Column(TEXT("SelBranchNested"))
+						.FixedWidth(100.0f)
+						.HAlignCell(HAlign_Center)
+						.DefaultLabel(FText::FromString(TEXT("Nested Mesh")))
+					]
+
+					+ SVerticalBox::Slot()
+					.FillHeight(1.0f)
+					.Padding(0.0f, 0.0f, 0.0f, 8.0f)
+					[
+						SNew(SScrollBox)
+						+ SScrollBox::Slot()
 						[
-							SNew(SMultiLineEditableTextBox)
-							.IsReadOnly(true)
-							.Text_Lambda([this]()
-							{
-								return FText::FromString(SelectionPreviewText);
-							})
+							SAssignNew(SelectionBranchRowsBox, SVerticalBox)
 						]
 					]
 
@@ -576,7 +732,24 @@ void SCadWorkflowWizard::Construct(const FArguments& InArgs)
 					.Padding(0.0f, 0.0f, 0.0f, 8.0f)
 					[
 						SNew(STextBlock)
-						.Text(FText::FromString(TEXT("Set child actor types in UI, then proceed to joint setup. Choose 'none' to exclude a child.")))
+						.Text(FText::FromString(TEXT("Choose which master direct-child branches to unpack by one level. Unpack deletes the selected direct child and promotes its children to direct children of the master.")))
+					]
+
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(0.0f, 0.0f, 0.0f, 8.0f)
+					[
+						SNew(SBox)
+						.MinDesiredHeight(140.0f)
+						[
+							SNew(SMultiLineEditableTextBox)
+							.IsReadOnly(true)
+							.Font(FAppStyle::Get().GetFontStyle(TEXT("MonoFont")))
+							.Text_Lambda([this]()
+							{
+								return FText::FromString(FlattenPreviewText);
+							})
+						]
 					]
 
 					+ SVerticalBox::Slot()
@@ -590,6 +763,114 @@ void SCadWorkflowWizard::Construct(const FArguments& InArgs)
 							const FString MasterName = MasterActor ? MasterActor->GetActorNameOrLabel() : TEXT("(not confirmed)");
 							return FText::FromString(FString::Printf(TEXT("Confirmed Master: %s"), *MasterName));
 						})
+					]
+
+					+ SVerticalBox::Slot()
+					.FillHeight(1.0f)
+					.Padding(0.0f, 0.0f, 0.0f, 12.0f)
+					[
+						SNew(SScrollBox)
+						+ SScrollBox::Slot()
+						[
+							SAssignNew(FlattenRowsBox, SVerticalBox)
+						]
+					]
+
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					[
+						SNew(SHorizontalBox)
+
+						+ SHorizontalBox::Slot()
+						.AutoWidth()
+						.Padding(0.0f, 0.0f, 8.0f, 0.0f)
+						[
+							SNew(SButton)
+							.Text(FText::FromString(TEXT("Back")))
+							.OnClicked(this, &SCadWorkflowWizard::HandleBack)
+						]
+
+						+ SHorizontalBox::Slot()
+						.AutoWidth()
+						[
+							SNew(SButton)
+							.Text(FText::FromString(TEXT("Apply Unpack + Next")))
+							.OnClicked(this, &SCadWorkflowWizard::ApplyFlattenAndContinue)
+						]
+					]
+				]
+
+				+ SWidgetSwitcher::Slot()
+				[
+					SNew(SVerticalBox)
+
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(0.0f, 0.0f, 0.0f, 8.0f)
+					[
+						SNew(STextBlock)
+						.Text(FText::FromString(TEXT("Review direct children, use Show / Type, and preview one-level unpack with the button on the right. Unpack is applied only when you press Next.")))
+					]
+
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(0.0f, 0.0f, 0.0f, 12.0f)
+					[
+						SNew(STextBlock)
+						.Text_Lambda([this]()
+						{
+							const AActor* MasterActor = ConfirmedSelection.MasterActor.Get();
+							const FString MasterName = MasterActor ? MasterActor->GetActorNameOrLabel() : TEXT("(not confirmed)");
+							return FText::FromString(FString::Printf(TEXT("Confirmed Master: %s"), *MasterName));
+						})
+					]
+
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(0.0f, 0.0f, 0.0f, 8.0f)
+					[
+						SNew(SHorizontalBox)
+
+						+ SHorizontalBox::Slot()
+						.FillWidth(1.0f)
+						.VAlign(VAlign_Center)
+						[
+							SNew(STextBlock)
+							.Text(FText::FromString(TEXT("Unpack preview rows are UI-only until Next. Reset restores the original direct-child list.")))
+						]
+
+						+ SHorizontalBox::Slot()
+						.AutoWidth()
+						[
+							SNew(SButton)
+							.Text(FText::FromString(TEXT("Reset")))
+							.OnClicked(this, &SCadWorkflowWizard::ResetFlattenPreview)
+						]
+					]
+
+					+ SVerticalBox::Slot()
+					.AutoHeight()
+					.Padding(0.0f, 0.0f, 0.0f, 6.0f)
+					[
+						SNew(SHeaderRow)
+						+ SHeaderRow::Column(TEXT("ChildName"))
+						.FillWidth(0.45f)
+						.DefaultLabel(FText::FromString(TEXT("Actor")))
+						+ SHeaderRow::Column(TEXT("ChildInfo"))
+						.FillWidth(0.25f)
+						.DefaultLabel(FText::FromString(TEXT("Info")))
+						+ SHeaderRow::Column(TEXT("ChildType"))
+						.FixedWidth(130.0f)
+						.HAlignCell(HAlign_Center)
+						.DefaultLabel(FText::FromString(TEXT("Type")))
+						+ SHeaderRow::Column(TEXT("ChildShow"))
+						.FixedWidth(90.0f)
+						.HAlignCell(HAlign_Center)
+						.DefaultLabel(FText::FromString(TEXT("Show")))
+						+ SHeaderRow::Column(TEXT("ChildFlatten"))
+						.FixedWidth(110.0f)
+						.HAlignCell(HAlign_Center)
+						.DefaultLabel(FText::FromString(TEXT("Unpack")))
 					]
 
 					+ SVerticalBox::Slot()
@@ -791,6 +1072,8 @@ void SCadWorkflowWizard::Construct(const FArguments& InArgs)
 		]
 	];
 
+	RebuildFlattenRows();
+	RebuildSelectionBranchRows();
 	RebuildChildRows();
 	ResetJointEditorState();
 }
@@ -865,6 +1148,8 @@ void SCadWorkflowWizard::RefreshSelectionPreview()
 	if (!GEditor)
 	{
 		SelectionPreviewText = TEXT("에디터 컨텍스트를 찾을 수 없습니다.");
+		SelectionBranchStats.Reset();
+		RebuildSelectionBranchRows();
 		return;
 	}
 
@@ -878,11 +1163,15 @@ void SCadWorkflowWizard::RefreshSelectionPreview()
 		{
 			SelectionPreviewText = TEXT("선택된 액터 없음");
 		}
+		SelectionBranchStats.Reset();
+		RebuildSelectionBranchRows();
 		return;
 	}
 
 	TArray<AActor*> DirectChildren;
 	CadActorHierarchyUtils::GetSortedAttachedChildren(SingleSelectedActor, DirectChildren, false);
+	SelectionBranchStats.Reset();
+	CadActorHierarchyUtils::AnalyzeDirectChildBranches(SingleSelectedActor, SelectionBranchStats);
 
 	FString Result = FString::Printf(
 		TEXT("Selected: %s\nPath: %s\nDirect Children: %d"),
@@ -890,17 +1179,375 @@ void SCadWorkflowWizard::RefreshSelectionPreview()
 		*SingleSelectedActor->GetPathName(),
 		DirectChildren.Num());
 
-	for (AActor* ChildActor : DirectChildren)
-	{
-		if (!ChildActor)
-		{
-			continue;
-		}
+	SelectionPreviewText = MoveTemp(Result);
+	RebuildSelectionBranchRows();
+}
 
-		Result += FString::Printf(TEXT("\n- %s"), *ChildActor->GetActorNameOrLabel());
+void SCadWorkflowWizard::RebuildSelectionBranchRows()
+{
+	if (!SelectionBranchRowsBox.IsValid())
+	{
+		return;
 	}
 
-	SelectionPreviewText = MoveTemp(Result);
+	SelectionBranchRowsBox->ClearChildren();
+
+	if (SelectionBranchStats.Num() == 0)
+	{
+		SelectionBranchRowsBox->AddSlot()
+		.AutoHeight()
+		.Padding(0.0f, 0.0f, 0.0f, 6.0f)
+		[
+			SNew(STextBlock)
+			.Text(FText::FromString(TEXT("No direct child branches.")))
+		];
+		return;
+	}
+
+	for (int32 BranchIndex = 0; BranchIndex < SelectionBranchStats.Num(); ++BranchIndex)
+	{
+		const FCadHierarchyBranchStats& BranchStat = SelectionBranchStats[BranchIndex];
+
+		SelectionBranchRowsBox->AddSlot()
+		.AutoHeight()
+		.Padding(0.0f, 0.0f, 0.0f, 6.0f)
+		[
+			SNew(SVerticalBox)
+
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			[
+				SNew(SHorizontalBox)
+
+				+ SHorizontalBox::Slot()
+				.FillWidth(0.55f)
+				.VAlign(VAlign_Center)
+				.Padding(4.0f, 2.0f)
+				[
+					SNew(STextBlock)
+					.Text(FText::FromString(BranchStat.BranchName))
+				]
+
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				.Padding(4.0f, 2.0f)
+				[
+					SNew(SBox)
+					.WidthOverride(70.0f)
+					[
+						SNew(STextBlock)
+						.Justification(ETextJustify::Center)
+						.Text(FText::AsNumber(BranchStat.MaxDepthFromRoot))
+					]
+				]
+
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				.Padding(4.0f, 2.0f)
+				[
+					SNew(SBox)
+					.WidthOverride(70.0f)
+					[
+						SNew(STextBlock)
+						.Justification(ETextJustify::Center)
+						.Text(FText::AsNumber(BranchStat.DirectChildCount))
+					]
+				]
+
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				.Padding(4.0f, 2.0f)
+				[
+					SNew(SBox)
+					.WidthOverride(70.0f)
+					[
+						SNew(STextBlock)
+						.Justification(ETextJustify::Center)
+						.Text(FText::AsNumber(BranchStat.DescendantCount))
+					]
+				]
+
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				.Padding(4.0f, 2.0f)
+				[
+					SNew(SBox)
+					.WidthOverride(100.0f)
+					[
+						SNew(STextBlock)
+						.Justification(ETextJustify::Center)
+						.Text(FText::AsNumber(BranchStat.NestedStaticMeshActorCount))
+					]
+				]
+			]
+
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(0.0f, 6.0f, 0.0f, 0.0f)
+			[
+				SNew(SBorder)
+				.Visibility(BranchIndex + 1 < SelectionBranchStats.Num() ? EVisibility::Visible : EVisibility::Collapsed)
+				.BorderImage(FCoreStyle::Get().GetBrush("WhiteBrush"))
+				.BorderBackgroundColor(FLinearColor(0.25f, 0.25f, 0.25f, 0.7f))
+				.Padding(FMargin(0.0f, 0.5f))
+			]
+		];
+	}
+}
+
+void SCadWorkflowWizard::RefreshFlattenBranchCandidates()
+{
+	FlattenBranchStats.Reset();
+	FlattenBranchSelections.Reset();
+	FlattenableChildActorPaths.Reset();
+
+	const AActor* MasterActor = ConfirmedSelection.MasterActor.Get();
+	if (!MasterActor)
+	{
+		FlattenPreviewText = TEXT("Confirm master actor first.");
+		RebuildFlattenRows();
+		return;
+	}
+
+	CadActorHierarchyUtils::AnalyzeDirectChildBranches(const_cast<AActor*>(MasterActor), FlattenBranchStats);
+	FlattenBranchSelections.Init(false, FlattenBranchStats.Num());
+	for (const FCadHierarchyBranchStats& BranchStat : FlattenBranchStats)
+	{
+		if (BranchStat.bCanFlattenOneLevel)
+		{
+			FlattenableChildActorPaths.Add(BranchStat.BranchPath);
+		}
+	}
+	const FString BranchTableText = BuildBranchDepthTableText(FlattenBranchStats);
+	FlattenPreviewText = FString::Printf(
+		TEXT("Master:\t%s\nPath:\t%s\n\n%s"),
+		*MasterActor->GetActorNameOrLabel(),
+		*MasterActor->GetPathName(),
+		*BranchTableText);
+	RebuildFlattenRows();
+}
+
+void SCadWorkflowWizard::RebuildFlattenRows()
+{
+	if (!FlattenRowsBox.IsValid())
+	{
+		return;
+	}
+
+	FlattenRowsBox->ClearChildren();
+
+	if (FlattenBranchStats.Num() == 0)
+	{
+		FlattenRowsBox->AddSlot()
+		.AutoHeight()
+		.Padding(0.0f, 0.0f, 0.0f, 6.0f)
+		[
+			SNew(STextBlock)
+			.Text(FText::FromString(TEXT("No unpack candidates available yet.")))
+		];
+		return;
+	}
+
+	for (int32 BranchIndex = 0; BranchIndex < FlattenBranchStats.Num(); ++BranchIndex)
+	{
+		const FCadHierarchyBranchStats& BranchStat = FlattenBranchStats[BranchIndex];
+		const FString RowText = FString::Printf(
+			TEXT("%s\tdepth=%d\tdirect=%d\tdesc=%d\tnested_mesh=%d\tunpackable=%s"),
+			*BranchStat.BranchName,
+			BranchStat.MaxDepthFromRoot,
+			BranchStat.DirectChildCount,
+			BranchStat.DescendantCount,
+			BranchStat.NestedStaticMeshActorCount,
+			*BoolToYesNoString(BranchStat.bCanFlattenOneLevel));
+
+		FlattenRowsBox->AddSlot()
+		.AutoHeight()
+		.Padding(0.0f, 0.0f, 0.0f, 6.0f)
+		[
+			SNew(SCheckBox)
+			.IsEnabled(BranchStat.bCanFlattenOneLevel)
+			.IsChecked_Lambda([this, BranchIndex]()
+			{
+				return FlattenBranchSelections.IsValidIndex(BranchIndex) && FlattenBranchSelections[BranchIndex]
+					? ECheckBoxState::Checked
+					: ECheckBoxState::Unchecked;
+			})
+			.OnCheckStateChanged_Lambda([this, BranchIndex](const ECheckBoxState NewState)
+			{
+				SetFlattenBranchSelected(BranchIndex, NewState == ECheckBoxState::Checked);
+			})
+			[
+				SNew(STextBlock)
+				.Font(FAppStyle::Get().GetFontStyle(TEXT("MonoFont")))
+				.Text(FText::FromString(RowText))
+			]
+		];
+	}
+}
+
+void SCadWorkflowWizard::RebuildChildEntriesFromFlattenPreview()
+{
+	TMap<FString, ECadMasterChildActorType> ActorTypesByPath;
+	for (const FCadChildEntry& ChildEntry : ChildEntries)
+	{
+		ActorTypesByPath.Add(ChildEntry.ActorPath, ChildEntry.ActorType);
+	}
+
+	ChildEntries.Reset();
+	PreviewPromotedChildActorPaths.Reset();
+	FlattenableChildActorPaths.Reset();
+
+	AActor* MasterActor = ConfirmedSelection.MasterActor.Get();
+	if (!MasterActor)
+	{
+		return;
+	}
+
+	for (const FCadChildEntry& BaseChildEntry : BaseChildEntries)
+	{
+		AppendFlattenPreviewEntriesRecursive(
+			BaseChildEntry,
+			MasterActor,
+			PendingFlattenBranchPaths,
+			ActorTypesByPath,
+			ChildEntries,
+			PreviewPromotedChildActorPaths);
+	}
+
+	for (const FCadChildEntry& ChildEntry : ChildEntries)
+	{
+		AActor* ChildActor = CadActorHierarchyUtils::FindByPath(ChildEntry.ActorPath);
+		if (CadActorHierarchyUtils::CanActorFlattenOneLevel(ChildActor))
+		{
+			FlattenableChildActorPaths.Add(ChildEntry.ActorPath);
+		}
+	}
+}
+
+void SCadWorkflowWizard::PreviewFlattenChild(const int32 ChildIndex)
+{
+	if (!ChildEntries.IsValidIndex(ChildIndex))
+	{
+		return;
+	}
+
+	const FCadChildEntry SelectedEntry = ChildEntries[ChildIndex];
+	if (!FlattenableChildActorPaths.Contains(SelectedEntry.ActorPath) || PendingFlattenBranchPaths.Contains(SelectedEntry.ActorPath))
+	{
+		return;
+	}
+
+	AActor* BranchActor = CadActorHierarchyUtils::FindByPath(SelectedEntry.ActorPath);
+	int32 DirectChildCount = 0;
+	if (!CadActorHierarchyUtils::CanActorFlattenOneLevel(BranchActor, &DirectChildCount))
+	{
+		return;
+	}
+
+	if (DirectChildCount > 20)
+	{
+		const EAppReturnType::Type Response = FMessageDialog::Open(
+			EAppMsgType::OkCancel,
+			FText::FromString(FString::Printf(
+				TEXT("'%s' has %d direct children.\nUnpack preview will replace this row with all of them.\n\nContinue?"),
+				*SelectedEntry.ActorName,
+				DirectChildCount)));
+		if (Response != EAppReturnType::Ok)
+		{
+			return;
+		}
+	}
+
+	if (SavedVisibility.Num() > 0)
+	{
+		RestoreChildVisibilityState();
+	}
+
+	PendingFlattenBranchPaths.Add(SelectedEntry.ActorPath);
+	SavedVisibility.Reset();
+	IsolatedIndex = INDEX_NONE;
+	RebuildChildEntriesFromFlattenPreview();
+	RebuildChildRows();
+
+	TArray<AActor*> PromotedActors;
+	CadActorHierarchyUtils::GetSortedAttachedChildren(BranchActor, PromotedActors, false);
+	TArray<FString> PromotedNames;
+	for (AActor* PromotedActor : PromotedActors)
+	{
+		if (PromotedActor)
+		{
+			PromotedNames.Add(PromotedActor->GetActorNameOrLabel());
+		}
+	}
+
+	SetStatus(FString::Printf(
+		TEXT("Unpack preview updated.\nbranch=%s\npromoted_children=%s\nNext를 누르면 실제 unpack이 적용됩니다."),
+		*SelectedEntry.ActorName,
+		PromotedNames.Num() > 0 ? *FString::Join(PromotedNames, TEXT(", ")) : TEXT("(none)")));
+}
+
+bool SCadWorkflowWizard::ApplyPendingFlattenPreview(FString& OutError)
+{
+	OutError.Reset();
+
+	if (!ConfirmedSelection.IsValid())
+	{
+		OutError = TEXT("Confirm master actor first.");
+		return false;
+	}
+
+	AActor* MasterActor = ConfirmedSelection.MasterActor.Get();
+	if (!MasterActor)
+	{
+		OutError = TEXT("Confirmed master actor is invalid.");
+		return false;
+	}
+
+	if (PendingFlattenBranchPaths.Num() == 0)
+	{
+		return true;
+	}
+
+	TArray<FString> BranchPathsToFlatten = PendingFlattenBranchPaths.Array();
+	FCadHierarchyFlattenResult FlattenResult;
+	if (!CadActorHierarchyUtils::TryFlattenSelectedDirectChildBranchesOneLevel(MasterActor, BranchPathsToFlatten, FlattenResult, OutError))
+	{
+		return false;
+	}
+
+	TMap<FString, ECadMasterChildActorType> PreviewTypesByPath;
+	for (const FCadChildEntry& PreviewEntry : ChildEntries)
+	{
+		PreviewTypesByPath.Add(PreviewEntry.ActorPath, PreviewEntry.ActorType);
+	}
+
+	FCadMasterSelection UpdatedSelection;
+	if (!CadMasterSelectionCollector::TryCollectFromMasterActor(MasterActor, UpdatedSelection, OutError))
+	{
+		return false;
+	}
+
+	ConfirmedSelection = UpdatedSelection;
+	BaseChildEntries = UpdatedSelection.Children;
+	ChildEntries = BaseChildEntries;
+	for (FCadChildEntry& ChildEntry : ChildEntries)
+	{
+		if (const ECadMasterChildActorType* PreviewType = PreviewTypesByPath.Find(ChildEntry.ActorPath))
+		{
+			ChildEntry.ActorType = *PreviewType;
+		}
+	}
+
+	PendingFlattenBranchPaths.Reset();
+	PreviewPromotedChildActorPaths.Reset();
+	RefreshFlattenBranchCandidates();
+	RebuildChildEntriesFromFlattenPreview();
+	RebuildChildRows();
+	return true;
 }
 
 void SCadWorkflowWizard::ResetJointEditorState()
@@ -2493,6 +3140,12 @@ void SCadWorkflowWizard::RebuildChildRows()
 
 	for (int32 ChildIndex = 0; ChildIndex < ChildEntries.Num(); ++ChildIndex)
 	{
+		const FCadChildEntry& ChildEntry = ChildEntries[ChildIndex];
+		const bool bIsPreviewPromoted = PreviewPromotedChildActorPaths.Contains(ChildEntry.ActorPath);
+		const bool bCanPreviewUnpack = FlattenableChildActorPaths.Contains(ChildEntry.ActorPath);
+		const bool bUnpackPending = PendingFlattenBranchPaths.Contains(ChildEntry.ActorPath);
+		const FString InfoText = BuildChildHierarchyInfoLabel(ChildEntry);
+
 		ChildTypeRowsBox->AddSlot()
 		.AutoHeight()
 		.Padding(0.0f, 0.0f, 0.0f, 6.0f)
@@ -2505,42 +3158,92 @@ void SCadWorkflowWizard::RebuildChildRows()
 				SNew(SHorizontalBox)
 
 				+ SHorizontalBox::Slot()
-				.FillWidth(1.0f)
+				.FillWidth(0.45f)
 				.VAlign(VAlign_Center)
+				.Padding(4.0f, 2.0f)
+				[
+					SNew(SHorizontalBox)
+
+					+ SHorizontalBox::Slot()
+					.FillWidth(1.0f)
+					.VAlign(VAlign_Center)
+					[
+						SNew(STextBlock)
+						.Text(FText::FromString(ChildEntry.ActorName))
+					]
+
+					+ SHorizontalBox::Slot()
+					.AutoWidth()
+					.HAlign(HAlign_Right)
+					.VAlign(VAlign_Center)
+					.Padding(6.0f, 0.0f, 0.0f, 0.0f)
+					[
+						SNew(STextBlock)
+						.Text(FText::FromString(bIsPreviewPromoted ? TEXT("[unpack-preview]") : TEXT("")))
+					]
+				]
+
+				+ SHorizontalBox::Slot()
+				.FillWidth(0.25f)
+				.VAlign(VAlign_Center)
+				.Padding(4.0f, 2.0f)
 				[
 					SNew(STextBlock)
-					.Text(FText::FromString(ChildEntries[ChildIndex].ActorName))
+					.Text(FText::FromString(InfoText))
 				]
 
 				+ SHorizontalBox::Slot()
 				.AutoWidth()
-				.Padding(0.0f, 0.0f, 8.0f, 0.0f)
-				.HAlign(HAlign_Right)
 				.VAlign(VAlign_Center)
+				.Padding(4.0f, 2.0f)
 				[
-					SNew(SComboBox<TSharedPtr<FString>>)
-					.OptionsSource(&ChildTypeItems)
-					.OnGenerateWidget_Lambda([](const TSharedPtr<FString> Item)
-					{
-						return SNew(STextBlock).Text(FText::FromString(Item.IsValid() ? *Item : TEXT("")));
-					})
-					.OnSelectionChanged_Lambda([this, ChildIndex](const TSharedPtr<FString> SelectedType, ESelectInfo::Type)
-					{
-						if (!SelectedType.IsValid())
-						{
-							return;
-						}
-						SetChildType(ChildIndex, *SelectedType);
-					})
+					SNew(SBox)
+					.WidthOverride(130.0f)
 					[
-						SNew(STextBlock)
+						SNew(SComboBox<TSharedPtr<FString>>)
+						.OptionsSource(&ChildTypeItems)
+						.OnGenerateWidget_Lambda([](const TSharedPtr<FString> Item)
+						{
+							return SNew(STextBlock).Text(FText::FromString(Item.IsValid() ? *Item : TEXT("")));
+						})
+						.OnSelectionChanged_Lambda([this, ChildIndex](const TSharedPtr<FString> SelectedType, ESelectInfo::Type)
+						{
+							if (!SelectedType.IsValid())
+							{
+								return;
+							}
+							SetChildType(ChildIndex, *SelectedType);
+						})
+						[
+							SNew(STextBlock)
+							.Text_Lambda([this, ChildIndex]()
+							{
+								if (!ChildEntries.IsValidIndex(ChildIndex))
+								{
+									return FText::FromString(TEXT("static"));
+								}
+								return FText::FromString(MasterChildActorTypeToUiString(ChildEntries[ChildIndex].ActorType));
+							})
+						]
+					]
+				]
+
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				.Padding(4.0f, 2.0f)
+				[
+					SNew(SBox)
+					.WidthOverride(90.0f)
+					[
+						SNew(SButton)
 						.Text_Lambda([this, ChildIndex]()
 						{
-							if (!ChildEntries.IsValidIndex(ChildIndex))
-							{
-								return FText::FromString(TEXT("static"));
-							}
-							return FText::FromString(MasterChildActorTypeToUiString(ChildEntries[ChildIndex].ActorType));
+							return FText::FromString(IsChildIsolated(ChildIndex) ? TEXT("Restore") : TEXT("Show"));
+						})
+						.OnClicked_Lambda([this, ChildIndex]()
+						{
+							return ToggleChildVisibility(ChildIndex);
 						})
 					]
 				]
@@ -2548,16 +3251,20 @@ void SCadWorkflowWizard::RebuildChildRows()
 				+ SHorizontalBox::Slot()
 				.AutoWidth()
 				.VAlign(VAlign_Center)
+				.Padding(4.0f, 2.0f)
 				[
-					SNew(SButton)
-					.Text_Lambda([this, ChildIndex]()
-					{
-						return FText::FromString(IsChildIsolated(ChildIndex) ? TEXT("Restore") : TEXT("Show"));
-					})
-					.OnClicked_Lambda([this, ChildIndex]()
-					{
-						return ToggleChildVisibility(ChildIndex);
-					})
+					SNew(SBox)
+					.WidthOverride(110.0f)
+					[
+						SNew(SButton)
+						.IsEnabled(bCanPreviewUnpack && !bUnpackPending)
+						.Text(FText::FromString(bUnpackPending ? TEXT("Unpacked") : TEXT("Unpack")))
+						.OnClicked_Lambda([this, ChildIndex]()
+						{
+							PreviewFlattenChild(ChildIndex);
+							return FReply::Handled();
+						})
+					]
 				]
 			]
 
@@ -2589,6 +3296,16 @@ void SCadWorkflowWizard::SetChildType(const int32 ChildIndex, const FString& Sel
 	}
 
 	ChildEntries[ChildIndex].ActorType = ParsedType;
+}
+
+void SCadWorkflowWizard::SetFlattenBranchSelected(const int32 BranchIndex, const bool bSelected)
+{
+	if (!FlattenBranchSelections.IsValidIndex(BranchIndex))
+	{
+		return;
+	}
+
+	FlattenBranchSelections[BranchIndex] = bSelected;
 }
 
 void SCadWorkflowWizard::SaveChildVisibility()
@@ -2710,14 +3427,14 @@ FReply SCadWorkflowWizard::HandleApplyWorkspace()
 
 FReply SCadWorkflowWizard::HandleBack()
 {
-	if (StepIndex == 3)
+	if (StepIndex == 4)
 	{
 		StopJointTestAnimation(true);
 		ClearJointPreviewLines();
 	}
 
-	const int32 NextStep = FMath::Max(0, StepIndex - 1);
-	if (SavedVisibility.Num() > 0 && NextStep < 2)
+	const int32 NextStep = (StepIndex == 3) ? 1 : FMath::Max(0, StepIndex - 1);
+	if (SavedVisibility.Num() > 0 && NextStep < 3)
 	{
 		RestoreChildVisibilityState();
 	}
@@ -2756,9 +3473,12 @@ FReply SCadWorkflowWizard::ConfirmMaster()
 	}
 
 	ConfirmedSelection = SelectionResult;
-	ChildEntries = SelectionResult.Children;
+	BaseChildEntries = SelectionResult.Children;
+	ChildEntries.Reset();
 	SavedVisibility.Reset();
 	IsolatedIndex = INDEX_NONE;
+	PendingFlattenBranchPaths.Reset();
+	PreviewPromotedChildActorPaths.Reset();
 	MasterJsonResult = FCadMasterJsonGenerationResult();
 	ChildJsonResult = FCadChildJsonResult();
 	BuildInput = FCadWorkflowBuildInput();
@@ -2766,21 +3486,52 @@ FReply SCadWorkflowWizard::ConfirmMaster()
 	bCanRevertLastBuild = false;
 	ResetJointEditorState();
 	CleanupDryRunPreviewFolder();
+	RefreshFlattenBranchCandidates();
+	RebuildChildEntriesFromFlattenPreview();
 	RebuildChildRows();
 
+	SetStep(3);
 	const AActor* ConfirmedMasterActor = ConfirmedSelection.MasterActor.Get();
-	SetStep(2);
 	SetStatus(FString::Printf(
-		TEXT("Master actor confirmed.\nmaster=%s\nchildren=%d\n다음 단계에서 child actor_type을 선택 후 joint setup 단계로 이동하세요. 'none'은 JSON 생성에서 제외합니다."),
+		TEXT("Master actor confirmed.\nmaster=%s\nchildren=%d\n3단계에서 Show / Type / Unpack preview를 설정하세요."),
 		ConfirmedMasterActor ? *ConfirmedMasterActor->GetActorNameOrLabel() : TEXT("(none)"),
 		ChildEntries.Num()));
 	return FReply::Handled();
 }
 
+FReply SCadWorkflowWizard::ApplyFlattenAndContinue()
+{
+	return ProceedToJointSetup();
+}
+
+FReply SCadWorkflowWizard::ResetFlattenPreview()
+{
+	if (SavedVisibility.Num() > 0)
+	{
+		RestoreChildVisibilityState();
+	}
+
+	PendingFlattenBranchPaths.Reset();
+	PreviewPromotedChildActorPaths.Reset();
+	SavedVisibility.Reset();
+	IsolatedIndex = INDEX_NONE;
+	ChildEntries.Reset();
+	RebuildChildEntriesFromFlattenPreview();
+	RebuildChildRows();
+	SetStatus(TEXT("Unpack preview was reset to the original direct-child list."));
+	return FReply::Handled();
+}
+
 FReply SCadWorkflowWizard::ProceedToJointSetup()
 {
-	FCadMasterSelection SelectionForGeneration;
 	FString Error;
+	if (!ApplyPendingFlattenPreview(Error))
+	{
+		SetStatus(FString::Printf(TEXT("Joint setup step failed during unpack apply:\n%s"), *Error));
+		return FReply::Handled();
+	}
+
+	FCadMasterSelection SelectionForGeneration;
 	if (!TryBuildSelectionForGeneration(SelectionForGeneration, Error))
 	{
 		SetStatus(FString::Printf(TEXT("Joint setup step failed:\n%s"), *Error));
@@ -2800,7 +3551,7 @@ FReply SCadWorkflowWizard::ProceedToJointSetup()
 	}
 
 	LoadEditableJointDocuments(SelectionForGeneration, PreviewChildDocuments);
-	SetStep(3);
+	SetStep(4);
 	SetStatus(FString::Printf(
 		TEXT("Joint setup editor is ready.\ndry_run_folder=%s\nDry-run JSON files were generated and read back successfully; review and edit the parsed joint data, then continue."),
 		DryRunPreviewFolderPath.IsEmpty() ? TEXT("(not available)") : *DryRunPreviewFolderPath));
@@ -2881,7 +3632,7 @@ FReply SCadWorkflowWizard::GenerateWorkflowJson()
 
 	ClearJointPreviewLines();
 	CleanupDryRunPreviewFolder();
-	SetStep(4);
+	SetStep(5);
 	SetStatus(FString::Printf(
 		TEXT("Master/Child JSON generated.\nmaster=%s\nchild_count=%d\nchild_folder=%s\nnext_step=build"),
 		*MasterJsonResult.WorkspacePaths.MasterJsonPath,
@@ -2921,7 +3672,7 @@ FReply SCadWorkflowWizard::BuildAssembly()
 
 	LastBuildReplaceResult = ReplaceResult;
 	bCanRevertLastBuild = ReplaceResult.bUsedTransaction;
-	SetStep(5);
+	SetStep(6);
 	SetStatus(FString::Printf(
 		TEXT("Build completed and level replacement executed.\nspawned_master=%s\nspawned_children=%d\ndeleted=%d\nrevert_available=%s"),
 		*LastBuildReplaceResult.SpawnedActorPath,
@@ -2947,7 +3698,7 @@ FReply SCadWorkflowWizard::RevertLastBuild()
 
 	bCanRevertLastBuild = false;
 	LastBuildReplaceResult = FCadLevelReplaceResult();
-	SetStep(4);
+	SetStep(5);
 	SetStatus(TEXT("Last build replacement was reverted via editor undo."));
 	return FReply::Handled();
 }
@@ -2960,6 +3711,13 @@ FReply SCadWorkflowWizard::RestartWorkflow()
 	}
 
 	ConfirmedSelection = FCadMasterSelection();
+	BaseChildEntries.Reset();
+	FlattenBranchStats.Reset();
+	FlattenBranchSelections.Reset();
+	FlattenPreviewText = TEXT("Confirm master actor first.");
+	PendingFlattenBranchPaths.Reset();
+	FlattenableChildActorPaths.Reset();
+	PreviewPromotedChildActorPaths.Reset();
 	ChildEntries.Reset();
 	SavedVisibility.Reset();
 	IsolatedIndex = INDEX_NONE;
@@ -2970,6 +3728,7 @@ FReply SCadWorkflowWizard::RestartWorkflow()
 	bCanRevertLastBuild = false;
 	ResetJointEditorState();
 	CleanupDryRunPreviewFolder();
+	RebuildFlattenRows();
 	RebuildChildRows();
 	SetStep(0);
 	SetStatus(TEXT("Workflow restarted. Step 1: Set workspace folder."));
@@ -2984,5 +3743,5 @@ void SCadWorkflowWizard::SetStatus(const FString& InMessage)
 
 void SCadWorkflowWizard::SetStep(const int32 InStepIndex)
 {
-	StepIndex = FMath::Clamp(InStepIndex, 0, 5);
+	StepIndex = FMath::Clamp(InStepIndex, 0, 6);
 }

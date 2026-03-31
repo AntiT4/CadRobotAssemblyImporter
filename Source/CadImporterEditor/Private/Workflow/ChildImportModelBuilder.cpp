@@ -45,11 +45,45 @@ namespace
 			OutLink.Visuals.Add(MoveTemp(Visual));
 		}
 	}
+
+	FString ExtractMasterActorNameFromPathForPlacement(const FString& ActorPath)
+	{
+		const FString TrimmedPath = ActorPath.TrimStartAndEnd();
+		if (TrimmedPath.IsEmpty())
+		{
+			return FString();
+		}
+
+		int32 SeparatorIndex = INDEX_NONE;
+		if (!TrimmedPath.FindLastChar(TEXT('.'), SeparatorIndex))
+		{
+			TrimmedPath.FindLastChar(TEXT(':'), SeparatorIndex);
+		}
+
+		return (SeparatorIndex != INDEX_NONE && SeparatorIndex + 1 < TrimmedPath.Len())
+			? TrimmedPath.Mid(SeparatorIndex + 1).TrimStartAndEnd()
+			: TrimmedPath;
+	}
+
+	void FillRootPlacementHint(
+		const FCadMasterDoc& MasterDocument,
+		const FCadChildEntry& ChildEntry,
+		FCadImportModel& OutModel)
+	{
+		OutModel.RootPlacement.bHasWorldTransform = true;
+		OutModel.RootPlacement.WorldTransform = ChildEntry.RelativeTransform * MasterDocument.MasterWorldTransform;
+		OutModel.RootPlacement.ParentActorName = ExtractMasterActorNameFromPathForPlacement(MasterDocument.MasterActorPath);
+		if (OutModel.RootPlacement.ParentActorName.IsEmpty())
+		{
+			OutModel.RootPlacement.ParentActorName = MasterDocument.MasterName.TrimStartAndEnd();
+		}
+	}
 }
 
 namespace CadChildImportModelBuilder
 {
 	bool TryBuildImportModel(
+		const FCadMasterDoc& MasterDocument,
 		const FCadChildEntry& ChildEntry,
 		const FCadChildDoc& ChildDocument,
 		const FString& ChildJsonFolderPath,
@@ -77,6 +111,7 @@ namespace CadChildImportModelBuilder
 		OutModel.RootLinkName = RootLinkName;
 		OutModel.SourceDirectory = ChildJsonFolderPath;
 		FillImportModelUnitsDefaults(OutModel);
+		FillRootPlacementHint(MasterDocument, ChildEntry, OutModel);
 
 		if (ChildDocument.Links.Num() > 0)
 		{
