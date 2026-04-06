@@ -7,6 +7,7 @@ enum class ECadMasterChildActorType : uint8
 {
 	None,
 	Static,
+	Background,
 	Movable
 };
 

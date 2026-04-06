@@ -1,5 +1,6 @@
 #include "ChildDocExporter.h"
 
+#include "CadImportStringUtils.h"
 #include "CadImporterEditor.h"
 #include "Editor/ActorHierarchyUtils.h"
 #include "Dom/JsonObject.h"
@@ -14,34 +15,6 @@
 
 namespace
 {
-	FString MasterChildTypeToString(const ECadMasterChildActorType ActorType)
-	{
-		switch (ActorType)
-		{
-		case ECadMasterChildActorType::None:
-			return FString();
-		case ECadMasterChildActorType::Movable:
-			return TEXT("movable");
-		case ECadMasterChildActorType::Static:
-		default:
-			return TEXT("static");
-		}
-	}
-
-	FString MasterJointTypeToString(const ECadImportJointType JointType)
-	{
-		switch (JointType)
-		{
-		case ECadImportJointType::Revolute:
-			return TEXT("revolute");
-		case ECadImportJointType::Prismatic:
-			return TEXT("prismatic");
-		case ECadImportJointType::Fixed:
-		default:
-			return TEXT("fixed");
-		}
-	}
-
 	FString GetActorDisplayNameForExtractor(const AActor* Actor)
 	{
 		return Actor ? Actor->GetActorNameOrLabel() : TEXT("(none)");
@@ -88,7 +61,7 @@ namespace
 	{
 		TSharedPtr<FJsonObject> JointObject = MakeShared<FJsonObject>();
 		JointObject->SetStringField(TEXT("joint_name"), Joint.JointName);
-		JointObject->SetStringField(TEXT("joint_type"), MasterJointTypeToString(Joint.JointType));
+		JointObject->SetStringField(TEXT("joint_type"), CadImportStringUtils::ToJointTypeString(Joint.JointType));
 		JointObject->SetStringField(TEXT("parent_actor_name"), Joint.ParentActorName);
 		JointObject->SetStringField(TEXT("child_actor_name"), Joint.ChildActorName);
 		JointObject->SetArrayField(TEXT("axis"), TArray<TSharedPtr<FJsonValue>>
@@ -188,7 +161,7 @@ namespace
 		RootObject->SetStringField(TEXT("source_actor_path"), ChildDocument.SourceActorPath);
 		if (CadMasterChildActorTypeShouldGenerateJson(ChildDocument.ActorType))
 		{
-			RootObject->SetStringField(TEXT("actor_type"), MasterChildTypeToString(ChildDocument.ActorType));
+			RootObject->SetStringField(TEXT("actor_type"), CadImportStringUtils::ToMasterChildActorTypeString(ChildDocument.ActorType));
 		}
 		RootObject->SetObjectField(TEXT("relative_transform"), CadJsonTransformUtils::MakeTransformObject(ChildDocument.RelativeTransform));
 
@@ -250,22 +223,16 @@ namespace
 	{
 		if (RawType.TrimStartAndEnd().IsEmpty())
 		{
-			OutError = TEXT("actor_type is empty. Set each child actor_type to 'static' or 'movable' in master json before extraction.");
+			OutError = TEXT("actor_type is empty. Set each child actor_type to 'static', 'background', or 'movable' in master json before extraction.");
 			return false;
 		}
 
-		if (RawType.Equals(TEXT("static"), ESearchCase::IgnoreCase))
+		if (CadImportStringUtils::TryParseMasterChildActorTypeString(RawType, OutType, false))
 		{
-			OutType = ECadMasterChildActorType::Static;
-			return true;
-		}
-		if (RawType.Equals(TEXT("movable"), ESearchCase::IgnoreCase))
-		{
-			OutType = ECadMasterChildActorType::Movable;
 			return true;
 		}
 
-		OutError = FString::Printf(TEXT("Unsupported child actor_type '%s'. Expected 'static' or 'movable'."), *RawType);
+		OutError = FString::Printf(TEXT("Unsupported child actor_type '%s'. Expected 'static', 'background', or 'movable'."), *RawType);
 		return false;
 	}
 }

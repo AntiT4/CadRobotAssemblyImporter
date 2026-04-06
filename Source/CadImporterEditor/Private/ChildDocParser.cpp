@@ -1,5 +1,6 @@
 #include "ChildDocParser.h"
 
+#include "CadImportStringUtils.h"
 #include "Dom/JsonObject.h"
 #include "Json/CadJsonTransformUtils.h"
 #include "Misc/FileHelper.h"
@@ -11,40 +12,23 @@ namespace
 	{
 		if (RawType.TrimStartAndEnd().IsEmpty())
 		{
-			OutError = TEXT("actor_type is empty. Set child actor_type to 'static' or 'movable'.");
+			OutError = TEXT("actor_type is empty. Set child actor_type to 'static', 'background', or 'movable'.");
 			return false;
 		}
 
-		if (RawType.Equals(TEXT("static"), ESearchCase::IgnoreCase))
+		if (CadImportStringUtils::TryParseMasterChildActorTypeString(RawType, OutType, false))
 		{
-			OutType = ECadMasterChildActorType::Static;
-			return true;
-		}
-		if (RawType.Equals(TEXT("movable"), ESearchCase::IgnoreCase))
-		{
-			OutType = ECadMasterChildActorType::Movable;
 			return true;
 		}
 
-		OutError = FString::Printf(TEXT("Unsupported actor_type '%s'. Expected 'static' or 'movable'."), *RawType);
+		OutError = FString::Printf(TEXT("Unsupported actor_type '%s'. Expected 'static', 'background', or 'movable'."), *RawType);
 		return false;
 	}
 
 	bool ParseJointType(const FString& RawType, ECadImportJointType& OutType, FString& OutError)
 	{
-		if (RawType.Equals(TEXT("fixed"), ESearchCase::IgnoreCase))
+		if (CadImportStringUtils::TryParseJointTypeString(RawType, OutType))
 		{
-			OutType = ECadImportJointType::Fixed;
-			return true;
-		}
-		if (RawType.Equals(TEXT("revolute"), ESearchCase::IgnoreCase))
-		{
-			OutType = ECadImportJointType::Revolute;
-			return true;
-		}
-		if (RawType.Equals(TEXT("prismatic"), ESearchCase::IgnoreCase))
-		{
-			OutType = ECadImportJointType::Prismatic;
 			return true;
 		}
 

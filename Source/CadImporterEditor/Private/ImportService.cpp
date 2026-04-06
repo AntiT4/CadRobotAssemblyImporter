@@ -2,6 +2,7 @@
 
 #include "CadImporterEditor.h"
 #include "Engine/Blueprint.h"
+#include "GameFramework/Actor.h"
 #include "Import/ImportExecutor.h"
 #include "ChildDocExporter.h"
 #include "ChildDocParser.h"
@@ -14,6 +15,8 @@
 
 namespace
 {
+	const FName BackgroundActorTag(TEXT("Background"));
+
 	void ShowErrorDialog(const FString& Title, const FString& Error)
 	{
 		FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(FString::Printf(TEXT("%s:\n%s"), *Title, *Error)));
@@ -24,6 +27,34 @@ namespace
 		UE_LOG(LogCadImporter, Error, TEXT("%s: %s"), LogPrefix, *Error);
 		ShowErrorDialog(DialogTitle, Error);
 		return false;
+	}
+
+	void ApplyBackgroundTagToBlueprint(UBlueprint* Blueprint, const bool bShouldApplyTag)
+	{
+		if (!Blueprint || !Blueprint->GeneratedClass)
+		{
+			return;
+		}
+
+		if (AActor* ActorDefaultObject = Cast<AActor>(Blueprint->GeneratedClass->GetDefaultObject()))
+		{
+			const bool bHadTag = ActorDefaultObject->Tags.Contains(BackgroundActorTag);
+			if (bShouldApplyTag)
+			{
+				ActorDefaultObject->Tags.AddUnique(BackgroundActorTag);
+			}
+			else
+			{
+				ActorDefaultObject->Tags.Remove(BackgroundActorTag);
+			}
+
+			const bool bHasTag = ActorDefaultObject->Tags.Contains(BackgroundActorTag);
+			if (bHadTag != bHasTag)
+			{
+				ActorDefaultObject->Modify();
+				Blueprint->MarkPackageDirty();
+			}
+		}
 	}
 }
 
@@ -116,6 +147,8 @@ bool FCadImportService::BuildFromWorkflow(
 				FString::Printf(TEXT("Child blueprint build failed for '%s'"), *ChildName),
 				Error);
 		}
+
+		ApplyBackgroundTagToBlueprint(ChildBlueprint, ChildEntry.ActorType == ECadMasterChildActorType::Background);
 
 		ChildBlueprintsByChildName.Add(ChildName, ChildBlueprint);
 		UE_LOG(

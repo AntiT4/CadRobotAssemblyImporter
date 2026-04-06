@@ -4,6 +4,9 @@
 
 namespace CadWorkspaceUtils
 {
+	FString NormalizeOptionalDirectoryPath(const FString& PathInput);
+	FString NormalizeOptionalFilePath(const FString& PathInput);
+
 	bool TryNormalizePath(
 		const FString& WorkspaceInput,
 		FString& OutTrimmedWorkspace,

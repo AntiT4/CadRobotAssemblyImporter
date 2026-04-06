@@ -1,6 +1,8 @@
 #include "MasterDocExporter.h"
 
 #include "CadMasterActor.h"
+#include "CadImportStringUtils.h"
+#include "Json/CadJsonTransformUtils.h"
 #include "MasterSelectionCollector.h"
 #include "Dom/JsonObject.h"
 #include "Misc/FileHelper.h"
@@ -10,59 +12,16 @@
 
 namespace
 {
-	FString ToMasterChildTypeString(const ECadMasterChildActorType ActorType)
-	{
-		switch (ActorType)
-		{
-		case ECadMasterChildActorType::None:
-			return FString();
-		case ECadMasterChildActorType::Movable:
-			return TEXT("movable");
-		case ECadMasterChildActorType::Static:
-		default:
-			return TEXT("static");
-		}
-	}
-
-	TSharedPtr<FJsonObject> MakeMasterWorkflowTransformObject(const FTransform& Transform)
-	{
-		const FVector Location = Transform.GetLocation();
-		const FRotator Rotation = Transform.GetRotation().Rotator();
-		const FVector Scale = Transform.GetScale3D();
-
-		TSharedPtr<FJsonObject> TransformObject = MakeShared<FJsonObject>();
-		TransformObject->SetArrayField(TEXT("location"), TArray<TSharedPtr<FJsonValue>>
-		{
-			MakeShared<FJsonValueNumber>(Location.X),
-			MakeShared<FJsonValueNumber>(Location.Y),
-			MakeShared<FJsonValueNumber>(Location.Z)
-		});
-		TransformObject->SetArrayField(TEXT("rotation"), TArray<TSharedPtr<FJsonValue>>
-		{
-			MakeShared<FJsonValueNumber>(Rotation.Roll),
-			MakeShared<FJsonValueNumber>(Rotation.Pitch),
-			MakeShared<FJsonValueNumber>(Rotation.Yaw)
-		});
-		TransformObject->SetArrayField(TEXT("scale"), TArray<TSharedPtr<FJsonValue>>
-		{
-			MakeShared<FJsonValueNumber>(Scale.X),
-			MakeShared<FJsonValueNumber>(Scale.Y),
-			MakeShared<FJsonValueNumber>(Scale.Z)
-		});
-
-		return TransformObject;
-	}
-
 	TSharedPtr<FJsonObject> MakeMasterChildObject(const FCadChildEntry& ChildEntry)
 	{
 		TSharedPtr<FJsonObject> ChildObject = MakeShared<FJsonObject>();
 		ChildObject->SetStringField(TEXT("actor_name"), ChildEntry.ActorName);
 		if (CadMasterChildActorTypeShouldGenerateJson(ChildEntry.ActorType))
 		{
-			ChildObject->SetStringField(TEXT("actor_type"), ToMasterChildTypeString(ChildEntry.ActorType));
+			ChildObject->SetStringField(TEXT("actor_type"), CadImportStringUtils::ToMasterChildActorTypeString(ChildEntry.ActorType));
 		}
 		ChildObject->SetStringField(TEXT("child_json_file_name"), ChildEntry.ChildJsonFileName);
-		ChildObject->SetObjectField(TEXT("relative_transform"), MakeMasterWorkflowTransformObject(ChildEntry.RelativeTransform));
+		ChildObject->SetObjectField(TEXT("relative_transform"), CadJsonTransformUtils::MakeTransformObject(ChildEntry.RelativeTransform));
 		return ChildObject;
 	}
 
@@ -71,7 +30,7 @@ namespace
 		TSharedPtr<FJsonObject> RootObject = MakeShared<FJsonObject>();
 		RootObject->SetStringField(TEXT("master_name"), Document.MasterName);
 		RootObject->SetStringField(TEXT("master_actor_path"), Document.MasterActorPath);
-		RootObject->SetObjectField(TEXT("master_world_transform"), MakeMasterWorkflowTransformObject(Document.MasterWorldTransform));
+		RootObject->SetObjectField(TEXT("master_world_transform"), CadJsonTransformUtils::MakeTransformObject(Document.MasterWorldTransform));
 		RootObject->SetStringField(TEXT("workspace_folder"), Document.WorkspaceFolder);
 		RootObject->SetStringField(TEXT("child_json_folder_name"), Document.ChildJsonFolderName);
 		RootObject->SetStringField(TEXT("content_root_path"), Document.ContentRootPath);

@@ -1,6 +1,6 @@
 #include "Workflow/WorkflowBuildInputResolver.h"
 
-#include "Misc/Paths.h"
+#include "Workflow/WorkspaceUtils.h"
 
 namespace
 {
@@ -8,19 +8,19 @@ namespace
 		const FCadWorkflowBuildInput& BuildInput,
 		const FCadMasterDoc& MasterDocument)
 	{
-		const FString InputWorkspace = BuildInput.WorkspaceFolder.TrimStartAndEnd();
+		const FString InputWorkspace = CadWorkspaceUtils::NormalizeOptionalDirectoryPath(BuildInput.WorkspaceFolder);
 		if (!InputWorkspace.IsEmpty())
 		{
-			return FPaths::ConvertRelativePathToFull(InputWorkspace);
+			return InputWorkspace;
 		}
 
-		const FString DocumentWorkspace = MasterDocument.WorkspaceFolder.TrimStartAndEnd();
+		const FString DocumentWorkspace = CadWorkspaceUtils::NormalizeOptionalDirectoryPath(MasterDocument.WorkspaceFolder);
 		if (!DocumentWorkspace.IsEmpty())
 		{
-			return FPaths::ConvertRelativePathToFull(DocumentWorkspace);
+			return DocumentWorkspace;
 		}
 
-		return FPaths::ConvertRelativePathToFull(FPaths::GetPath(BuildInput.MasterJsonPath));
+		return CadWorkspaceUtils::NormalizeOptionalDirectoryPath(FPaths::GetPath(BuildInput.MasterJsonPath));
 	}
 
 	FString ResolveChildJsonFolder(
@@ -28,13 +28,13 @@ namespace
 		const FCadMasterDoc& MasterDocument,
 		const FString& WorkspaceFolder)
 	{
-		const FString ExplicitChildFolder = BuildInput.ChildJsonFolderPath.TrimStartAndEnd();
+		const FString ExplicitChildFolder = CadWorkspaceUtils::NormalizeOptionalDirectoryPath(BuildInput.ChildJsonFolderPath);
 		if (!ExplicitChildFolder.IsEmpty())
 		{
-			return FPaths::ConvertRelativePathToFull(ExplicitChildFolder);
+			return ExplicitChildFolder;
 		}
 
-		return FPaths::ConvertRelativePathToFull(FPaths::Combine(WorkspaceFolder, MasterDocument.ChildJsonFolderName));
+		return CadWorkspaceUtils::NormalizeOptionalDirectoryPath(FPaths::Combine(WorkspaceFolder, MasterDocument.ChildJsonFolderName));
 	}
 }
 
@@ -45,7 +45,7 @@ namespace CadWorkflowBuildInputResolver
 		const FCadMasterDoc& MasterDocument)
 	{
 		FCadWorkflowBuildInput ResolvedBuildInput = BuildInput;
-		ResolvedBuildInput.MasterJsonPath = FPaths::ConvertRelativePathToFull(BuildInput.MasterJsonPath.TrimStartAndEnd());
+		ResolvedBuildInput.MasterJsonPath = CadWorkspaceUtils::NormalizeOptionalFilePath(BuildInput.MasterJsonPath);
 		ResolvedBuildInput.WorkspaceFolder = ResolveWorkspaceFolder(ResolvedBuildInput, MasterDocument);
 		ResolvedBuildInput.ChildJsonFolderPath = ResolveChildJsonFolder(ResolvedBuildInput, MasterDocument, ResolvedBuildInput.WorkspaceFolder);
 		ResolvedBuildInput.ContentRootPath = BuildInput.ContentRootPath.TrimStartAndEnd().IsEmpty()

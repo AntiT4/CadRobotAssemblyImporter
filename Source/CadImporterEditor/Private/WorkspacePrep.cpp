@@ -1,6 +1,7 @@
 #include "WorkspacePrep.h"
 
 #include "CadMasterActor.h"
+#include "Workflow/WorkspaceUtils.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "HAL/PlatformFileManager.h"
 #include "Misc/Paths.h"
@@ -20,27 +21,6 @@ namespace
 		return false;
 	}
 
-	FString NormalizeWorkspaceFolder(const FString& WorkspaceFolderInput)
-	{
-		FString WorkspaceFolder = WorkspaceFolderInput.TrimStartAndEnd();
-		if (WorkspaceFolder.IsEmpty())
-		{
-			return FString();
-		}
-
-		if (FPaths::IsRelative(WorkspaceFolder))
-		{
-			WorkspaceFolder = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), WorkspaceFolder));
-		}
-		else
-		{
-			WorkspaceFolder = FPaths::ConvertRelativePathToFull(WorkspaceFolder);
-		}
-
-		FPaths::NormalizeDirectoryName(WorkspaceFolder);
-		return WorkspaceFolder;
-	}
-
 	bool ValidateAndNormalizeInputs(
 		const FString& WorkspaceFolderInput,
 		const FString& MasterNameInput,
@@ -50,7 +30,7 @@ namespace
 	{
 		OutError.Reset();
 
-		OutWorkspaceFolder = NormalizeWorkspaceFolder(WorkspaceFolderInput);
+		OutWorkspaceFolder = CadWorkspaceUtils::NormalizeOptionalDirectoryPath(WorkspaceFolderInput);
 		if (OutWorkspaceFolder.IsEmpty())
 		{
 			OutError = TEXT("Workspace folder is empty. Set a workspace folder first.");

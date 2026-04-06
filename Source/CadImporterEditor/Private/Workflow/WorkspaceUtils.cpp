@@ -23,6 +23,48 @@ namespace
 
 namespace CadWorkspaceUtils
 {
+	FString NormalizeOptionalDirectoryPath(const FString& PathInput)
+	{
+		FString NormalizedPath = PathInput.TrimStartAndEnd();
+		if (NormalizedPath.IsEmpty())
+		{
+			return FString();
+		}
+
+		if (FPaths::IsRelative(NormalizedPath))
+		{
+			NormalizedPath = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), NormalizedPath));
+		}
+		else
+		{
+			NormalizedPath = FPaths::ConvertRelativePathToFull(NormalizedPath);
+		}
+
+		FPaths::NormalizeDirectoryName(NormalizedPath);
+		return NormalizedPath;
+	}
+
+	FString NormalizeOptionalFilePath(const FString& PathInput)
+	{
+		FString NormalizedPath = PathInput.TrimStartAndEnd();
+		if (NormalizedPath.IsEmpty())
+		{
+			return FString();
+		}
+
+		if (FPaths::IsRelative(NormalizedPath))
+		{
+			NormalizedPath = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), NormalizedPath));
+		}
+		else
+		{
+			NormalizedPath = FPaths::ConvertRelativePathToFull(NormalizedPath);
+		}
+
+		FPaths::NormalizeFilename(NormalizedPath);
+		return NormalizedPath;
+	}
+
 	bool TryNormalizePath(
 		const FString& WorkspaceInput,
 		FString& OutTrimmedWorkspace,
@@ -40,17 +82,7 @@ namespace CadWorkspaceUtils
 			return false;
 		}
 
-		FString NormalizedWorkspace = OutTrimmedWorkspace;
-		if (FPaths::IsRelative(NormalizedWorkspace))
-		{
-			NormalizedWorkspace = FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectDir(), NormalizedWorkspace));
-		}
-		else
-		{
-			NormalizedWorkspace = FPaths::ConvertRelativePathToFull(NormalizedWorkspace);
-		}
-		FPaths::NormalizeDirectoryName(NormalizedWorkspace);
-
+		FString NormalizedWorkspace = NormalizeOptionalDirectoryPath(OutTrimmedWorkspace);
 		if (NormalizedWorkspace.IsEmpty())
 		{
 			OutError = TEXT("Workspace path normalization produced an empty value.");

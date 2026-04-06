@@ -1,5 +1,6 @@
 #include "UI/ImportDialogUtils.h"
 
+#include "CadImportStringUtils.h"
 #include "Import/AssetImportUtils.h"
 #include "CadImporterEditor.h"
 #include "Editor.h"
@@ -8,43 +9,17 @@ namespace CadImportDialogUtils
 {
 	FString ProfileToString(ECadImportModelProfile Profile)
 	{
-		switch (Profile)
-		{
-		case ECadImportModelProfile::FixedAssembly:
-			return TEXT("fixed_assembly");
-		case ECadImportModelProfile::DynamicRobot:
-		default:
-			return TEXT("dynamic_robot");
-		}
+		return CadImportStringUtils::ToImportModelProfileString(Profile);
 	}
 
 	FString JointDriveModeToString(ECadImportJointDriveMode Mode)
 	{
-		switch (Mode)
-		{
-		case ECadImportJointDriveMode::None:
-			return TEXT("none");
-		case ECadImportJointDriveMode::Velocity:
-			return TEXT("velocity");
-		case ECadImportJointDriveMode::Position:
-		default:
-			return TEXT("position");
-		}
+		return CadImportStringUtils::ToJointDriveModeString(Mode);
 	}
 
 	FString JointTypeToString(ECadImportJointType Type)
 	{
-		switch (Type)
-		{
-		case ECadImportJointType::Fixed:
-			return TEXT("fixed");
-		case ECadImportJointType::Revolute:
-			return TEXT("revolute");
-		case ECadImportJointType::Prismatic:
-			return TEXT("prismatic");
-		default:
-			return TEXT("unknown");
-		}
+		return CadImportStringUtils::ToJointTypeString(Type);
 	}
 
 	FString FormatVector(const FVector& Value)

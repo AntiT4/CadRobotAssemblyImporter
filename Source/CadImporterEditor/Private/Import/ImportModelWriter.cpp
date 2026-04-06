@@ -1,6 +1,8 @@
 #include "Import/ImportModelWriter.h"
 
+#include "CadImportStringUtils.h"
 #include "Dom/JsonObject.h"
+#include "Json/CadJsonTransformUtils.h"
 #include "Misc/FileHelper.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
@@ -9,57 +11,12 @@ namespace
 {
 	FString ModelProfileToString(const ECadImportModelProfile Profile)
 	{
-		switch (Profile)
-		{
-		case ECadImportModelProfile::FixedAssembly:
-			return TEXT("fixed_assembly");
-		case ECadImportModelProfile::DynamicRobot:
-		default:
-			return TEXT("dynamic_robot");
-		}
+		return CadImportStringUtils::ToImportModelProfileString(Profile);
 	}
 
 	FString JointDriveModeToString(const ECadImportJointDriveMode Mode)
 	{
-		switch (Mode)
-		{
-		case ECadImportJointDriveMode::None:
-			return TEXT("none");
-		case ECadImportJointDriveMode::Velocity:
-			return TEXT("velocity");
-		case ECadImportJointDriveMode::Position:
-		default:
-			return TEXT("position");
-		}
-	}
-
-	TSharedPtr<FJsonObject> MakeTransformObject(const FTransform& Transform)
-	{
-		const FVector Location = Transform.GetLocation();
-		const FRotator Rotation = Transform.GetRotation().Rotator();
-		const FVector Scale = Transform.GetScale3D();
-
-		TSharedPtr<FJsonObject> TransformObject = MakeShared<FJsonObject>();
-		TransformObject->SetArrayField(TEXT("location"), TArray<TSharedPtr<FJsonValue>>
-		{
-			MakeShared<FJsonValueNumber>(Location.X),
-			MakeShared<FJsonValueNumber>(Location.Y),
-			MakeShared<FJsonValueNumber>(Location.Z)
-		});
-		TransformObject->SetArrayField(TEXT("rotation"), TArray<TSharedPtr<FJsonValue>>
-		{
-			MakeShared<FJsonValueNumber>(Rotation.Roll),
-			MakeShared<FJsonValueNumber>(Rotation.Pitch),
-			MakeShared<FJsonValueNumber>(Rotation.Yaw)
-		});
-		TransformObject->SetArrayField(TEXT("scale"), TArray<TSharedPtr<FJsonValue>>
-		{
-			MakeShared<FJsonValueNumber>(Scale.X),
-			MakeShared<FJsonValueNumber>(Scale.Y),
-			MakeShared<FJsonValueNumber>(Scale.Z)
-		});
-
-		return TransformObject;
+		return CadImportStringUtils::ToJointDriveModeString(Mode);
 	}
 
 	TSharedPtr<FJsonObject> MakeRootPlacementObject(const FCadImportRootPlacement& Placement)
@@ -72,7 +29,7 @@ namespace
 		TSharedPtr<FJsonObject> PlacementObject = MakeShared<FJsonObject>();
 		if (Placement.bHasWorldTransform)
 		{
-			PlacementObject->SetObjectField(TEXT("world_transform"), MakeTransformObject(Placement.WorldTransform));
+			PlacementObject->SetObjectField(TEXT("world_transform"), CadJsonTransformUtils::MakeTransformObject(Placement.WorldTransform));
 		}
 		if (!Placement.ParentActorName.IsEmpty())
 		{
@@ -96,22 +53,7 @@ namespace
 			JointObject->SetStringField(TEXT("component_name2"), ExportComponentName2);
 		}
 
-		FString JointType = TEXT("fixed");
-		switch (Joint.Type)
-		{
-		case ECadImportJointType::Fixed:
-			JointType = TEXT("fixed");
-			break;
-		case ECadImportJointType::Revolute:
-			JointType = TEXT("revolute");
-			break;
-		case ECadImportJointType::Prismatic:
-			JointType = TEXT("prismatic");
-			break;
-		default:
-			break;
-		}
-		JointObject->SetStringField(TEXT("type"), JointType);
+		JointObject->SetStringField(TEXT("type"), CadImportStringUtils::ToJointTypeString(Joint.Type));
 
 		JointObject->SetArrayField(TEXT("axis"), TArray<TSharedPtr<FJsonValue>>
 		{
@@ -147,7 +89,7 @@ namespace
 	{
 		TSharedPtr<FJsonObject> VisualObject = MakeShared<FJsonObject>();
 		VisualObject->SetStringField(TEXT("mesh_path"), Visual.MeshPath);
-		VisualObject->SetObjectField(TEXT("transform"), MakeTransformObject(Visual.Transform));
+		VisualObject->SetObjectField(TEXT("transform"), CadJsonTransformUtils::MakeTransformObject(Visual.Transform));
 
 		if (!Visual.MaterialPath.IsEmpty())
 		{
@@ -187,7 +129,7 @@ namespace
 
 		TSharedPtr<FJsonObject> LinkObject = MakeShared<FJsonObject>();
 		LinkObject->SetStringField(TEXT("name"), Link->Name);
-		LinkObject->SetObjectField(TEXT("transform"), MakeTransformObject(Link->Transform));
+		LinkObject->SetObjectField(TEXT("transform"), CadJsonTransformUtils::MakeTransformObject(Link->Transform));
 
 		if (Link->Physics.Mass > 0.0f || Link->Physics.bSimulatePhysics)
 		{
