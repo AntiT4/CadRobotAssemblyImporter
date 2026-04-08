@@ -10,6 +10,8 @@ namespace CadImportStringUtils
 		const FString& RawType,
 		ECadMasterChildActorType& OutType,
 		bool bAllowNone = true);
+	FString ToMasterNodeTypeString(ECadMasterNodeType NodeType);
+	bool TryParseMasterNodeTypeString(const FString& RawType, ECadMasterNodeType& OutType);
 	FString ToJointTypeString(ECadImportJointType JointType);
 	bool TryParseJointTypeString(const FString& RawType, ECadImportJointType& OutType);
 	FString ToImportModelProfileString(ECadImportModelProfile Profile);

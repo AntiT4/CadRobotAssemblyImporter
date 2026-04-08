@@ -28,6 +28,52 @@ namespace
 
 		return FString::Printf(TEXT("%s/BP_%s_Master"), *ContentRootPath, *SafeMasterName);
 	}
+
+	ECadMasterPlacementNodeType ToMasterBlueprintPlacementNodeType(const ECadMasterNodeType NodeType)
+	{
+		switch (NodeType)
+		{
+		case ECadMasterNodeType::Background:
+			return ECadMasterPlacementNodeType::Background;
+		case ECadMasterNodeType::Robot:
+			return ECadMasterPlacementNodeType::Robot;
+		case ECadMasterNodeType::Master:
+			return ECadMasterPlacementNodeType::Master;
+		case ECadMasterNodeType::Static:
+		default:
+			return ECadMasterPlacementNodeType::Static;
+		}
+	}
+
+	void AppendMasterBlueprintPlacementNodesRecursive(
+		const FCadMasterHierarchyNode& SourceNode,
+		const int32 ParentNodeIndex,
+		TArray<FCadMasterPlacementNodeRecord>& OutNodes)
+	{
+		FCadMasterPlacementNodeRecord PlacementNode;
+		PlacementNode.NodeName = SourceNode.ActorName;
+		PlacementNode.NodeType = ToMasterBlueprintPlacementNodeType(SourceNode.NodeType);
+		PlacementNode.ChildJsonFileName = SourceNode.ChildJsonFileName;
+		PlacementNode.MasterJsonFileName = SourceNode.MasterJsonFileName;
+		PlacementNode.RelativeTransform = SourceNode.RelativeTransform;
+		PlacementNode.ParentNodeIndex = ParentNodeIndex;
+		const int32 CurrentNodeIndex = OutNodes.Add(MoveTemp(PlacementNode));
+		for (const FCadMasterHierarchyNode& ChildNode : SourceNode.Children)
+		{
+			AppendMasterBlueprintPlacementNodesRecursive(ChildNode, CurrentNodeIndex, OutNodes);
+		}
+	}
+
+	FCadMasterHierarchyNode BuildMasterBlueprintHierarchyNodeFromChildEntry(const FCadChildEntry& ChildEntry)
+	{
+		FCadMasterHierarchyNode HierarchyNode;
+		HierarchyNode.ActorName = ChildEntry.ActorName;
+		HierarchyNode.ActorPath = ChildEntry.ActorPath;
+		HierarchyNode.RelativeTransform = ChildEntry.RelativeTransform;
+		HierarchyNode.NodeType = CadMasterNodeTypeFromChildActorType(ChildEntry.ActorType);
+		HierarchyNode.ChildJsonFileName = ChildEntry.ChildJsonFileName;
+		return HierarchyNode;
+	}
 }
 
 namespace CadMasterBlueprintBuilder
@@ -100,8 +146,24 @@ namespace CadMasterBlueprintBuilder
 		MasterDefaultObject->Metadata.Description = FString::Printf(
 			TEXT("Generated from master json: %s"),
 			*BuildInput.MasterJsonPath);
-		MasterDefaultObject->Metadata.SchemaVersion = TEXT("master_json_v1");
+		MasterDefaultObject->Metadata.SchemaVersion = TEXT("master_json_v2");
+		MasterDefaultObject->HierarchyNodes.Reset();
 		MasterDefaultObject->ChildPlacements.Reset();
+
+		if (MasterDocument.HierarchyChildren.Num() > 0)
+		{
+			for (const FCadMasterHierarchyNode& HierarchyNode : MasterDocument.HierarchyChildren)
+			{
+				AppendMasterBlueprintPlacementNodesRecursive(HierarchyNode, INDEX_NONE, MasterDefaultObject->HierarchyNodes);
+			}
+		}
+		else
+		{
+			for (const FCadChildEntry& ChildEntry : MasterDocument.Children)
+			{
+				AppendMasterBlueprintPlacementNodesRecursive(BuildMasterBlueprintHierarchyNodeFromChildEntry(ChildEntry), INDEX_NONE, MasterDefaultObject->HierarchyNodes);
+			}
+		}
 
 		for (const FCadChildEntry& ChildEntry : MasterDocument.Children)
 		{

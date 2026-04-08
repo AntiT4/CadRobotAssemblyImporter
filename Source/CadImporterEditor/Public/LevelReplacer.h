@@ -20,7 +20,8 @@ namespace CadLevelReplacer
 	bool TryReplaceMasterHierarchyWithBlueprints(
 		const FCadMasterDoc& MasterDocument,
 		UBlueprint* MasterBlueprint,
-		const TMap<FString, UBlueprint*>& ChildBlueprintsByChildName,
+		const TMap<FString, UBlueprint*>& MasterBlueprintsByJsonPath,
+		const TMap<FString, UBlueprint*>& ChildBlueprintsByJsonPath,
 		FCadLevelReplaceResult& OutResult,
 		FString& OutError);
 }

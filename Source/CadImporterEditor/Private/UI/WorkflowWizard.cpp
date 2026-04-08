@@ -1,6 +1,7 @@
 #include "UI/WorkflowWizard.h"
 #include "UI/WorkflowWizardSharedUtils.h"
 
+#include "CadMasterActor.h"
 #include "CadImportStringUtils.h"
 #include "CadImporterEditorUserSettings.h"
 #include "ChildDocParser.h"
@@ -40,6 +41,206 @@
 
 using namespace CadWorkflowWizardShared;
 
+namespace
+{
+	FString ToWorkflowNodeTypeLabel(const ECadMasterChildActorType ActorType)
+	{
+		switch (ActorType)
+		{
+		case ECadMasterChildActorType::Movable:
+			return TEXT("movable");
+		case ECadMasterChildActorType::Background:
+			return TEXT("background");
+		case ECadMasterChildActorType::None:
+			return TEXT("none");
+		case ECadMasterChildActorType::Static:
+		default:
+			return TEXT("static");
+		}
+	}
+
+	bool TryParseWorkflowNodeTypeLabel(const FString& SelectedType, ECadMasterChildActorType& OutType)
+	{
+		if (SelectedType.Equals(TEXT("robot"), ESearchCase::IgnoreCase))
+		{
+			OutType = ECadMasterChildActorType::Movable;
+			return true;
+		}
+
+		return CadImportStringUtils::TryParseMasterChildActorTypeString(SelectedType, OutType, true);
+	}
+
+	bool IsHierarchyNodePathFlattenable(const FCadMasterHierarchyNode& Node)
+	{
+		AActor* NodeActor = CadActorHierarchyUtils::FindByPath(Node.ActorPath);
+		return CadActorHierarchyUtils::CanActorFlattenOneLevel(NodeActor);
+	}
+
+	void BuildEditableHierarchyNodeRecursive(
+		const FCadMasterHierarchyNode& SourceNode,
+		const TSet<FString>& ForcedMasterPaths,
+		const TSet<FString>& BranchPathsTreatedAsNone,
+		const TMap<FString, ECadMasterChildActorType>& ExistingLeafTypesByPath,
+		SCadWorkflowWizard::FEditableHierarchyNode& OutNode)
+	{
+		OutNode = SCadWorkflowWizard::FEditableHierarchyNode();
+		OutNode.ActorName = SourceNode.ActorName;
+		OutNode.ActorPath = SourceNode.ActorPath;
+		OutNode.RelativeTransform = SourceNode.RelativeTransform;
+		OutNode.bCanPromoteToMaster = IsHierarchyNodePathFlattenable(SourceNode);
+
+		AActor* SourceActor = CadActorHierarchyUtils::FindByPath(SourceNode.ActorPath);
+		const bool bForcedMaster = ForcedMasterPaths.Contains(SourceNode.ActorPath);
+		const bool bIsExplicitMasterActor = SourceActor && SourceActor->IsA<ACadMasterActor>();
+		OutNode.bIsBranchNode = bForcedMaster || bIsExplicitMasterActor;
+		OutNode.bTreatAsMaster = OutNode.bIsBranchNode && !BranchPathsTreatedAsNone.Contains(SourceNode.ActorPath);
+		OutNode.bIncluded = true;
+		OutNode.LeafType = ECadMasterChildActorType::Static;
+
+		if (const ECadMasterChildActorType* ExistingLeafType = ExistingLeafTypesByPath.Find(SourceNode.ActorPath))
+		{
+			OutNode.LeafType = *ExistingLeafType;
+		}
+
+		if (!OutNode.bIsBranchNode)
+		{
+			return;
+		}
+
+		for (const FCadMasterHierarchyNode& ChildNode : SourceNode.Children)
+		{
+			SCadWorkflowWizard::FEditableHierarchyNode EditableChildNode;
+			BuildEditableHierarchyNodeRecursive(
+				ChildNode,
+				ForcedMasterPaths,
+				BranchPathsTreatedAsNone,
+				ExistingLeafTypesByPath,
+				EditableChildNode);
+			OutNode.Children.Add(MoveTemp(EditableChildNode));
+		}
+	}
+
+	void FlattenEditableHierarchyNodeRecursive(
+		const SCadWorkflowWizard::FEditableHierarchyNode& Node,
+		const FTransform& ParentAccumulatedTransform,
+		TArray<FCadChildEntry>& OutChildEntries)
+	{
+		const FTransform AccumulatedTransform = Node.RelativeTransform * ParentAccumulatedTransform;
+		if (Node.bIsBranchNode)
+		{
+			for (const SCadWorkflowWizard::FEditableHierarchyNode& ChildNode : Node.Children)
+			{
+				FlattenEditableHierarchyNodeRecursive(ChildNode, AccumulatedTransform, OutChildEntries);
+			}
+			return;
+		}
+
+		if (!Node.bIncluded || !CadMasterChildActorTypeShouldGenerateJson(Node.LeafType))
+		{
+			return;
+		}
+
+		FCadChildEntry ChildEntry;
+		ChildEntry.ActorName = Node.ActorName;
+		ChildEntry.ActorPath = Node.ActorPath;
+		ChildEntry.RelativeTransform = AccumulatedTransform;
+		ChildEntry.ActorType = Node.LeafType;
+		const FString SafeName = FPaths::MakeValidFileName(Node.ActorName);
+		ChildEntry.ChildJsonFileName = FString::Printf(TEXT("%s.json"), SafeName.IsEmpty() ? TEXT("Child") : *SafeName);
+		OutChildEntries.Add(MoveTemp(ChildEntry));
+	}
+
+	void AppendSelectionHierarchyNodesRecursive(
+		const SCadWorkflowWizard::FEditableHierarchyNode& EditableNode,
+		const FTransform& ParentAccumulatedTransform,
+		TArray<FCadMasterHierarchyNode>& OutNodes)
+	{
+		const FTransform AccumulatedTransform = EditableNode.RelativeTransform * ParentAccumulatedTransform;
+		if (EditableNode.bIsBranchNode && EditableNode.bTreatAsMaster)
+		{
+			FCadMasterHierarchyNode OutNode;
+			OutNode.ActorName = EditableNode.ActorName;
+			OutNode.ActorPath = EditableNode.ActorPath;
+			OutNode.RelativeTransform = AccumulatedTransform;
+			OutNode.NodeType = ECadMasterNodeType::Master;
+			for (const SCadWorkflowWizard::FEditableHierarchyNode& EditableChildNode : EditableNode.Children)
+			{
+				AppendSelectionHierarchyNodesRecursive(EditableChildNode, FTransform::Identity, OutNode.Children);
+			}
+			OutNodes.Add(MoveTemp(OutNode));
+			return;
+		}
+
+		if (EditableNode.bIsBranchNode)
+		{
+			for (const SCadWorkflowWizard::FEditableHierarchyNode& EditableChildNode : EditableNode.Children)
+			{
+				AppendSelectionHierarchyNodesRecursive(EditableChildNode, AccumulatedTransform, OutNodes);
+			}
+			return;
+		}
+
+		if (!EditableNode.bIncluded || !CadMasterChildActorTypeShouldGenerateJson(EditableNode.LeafType))
+		{
+			return;
+		}
+
+		FCadMasterHierarchyNode OutNode;
+		OutNode.ActorName = EditableNode.ActorName;
+		OutNode.ActorPath = EditableNode.ActorPath;
+		OutNode.RelativeTransform = AccumulatedTransform;
+		OutNode.NodeType = CadMasterNodeTypeFromChildActorType(EditableNode.LeafType);
+		const FString SafeName = FPaths::MakeValidFileName(EditableNode.ActorName);
+		OutNode.ChildJsonFileName = FString::Printf(TEXT("%s.json"), SafeName.IsEmpty() ? TEXT("Child") : *SafeName);
+		OutNodes.Add(MoveTemp(OutNode));
+	}
+
+	bool SetEditableNodeLeafTypeRecursive(
+		TArray<SCadWorkflowWizard::FEditableHierarchyNode>& Nodes,
+		const FString& ActorPath,
+		const ECadMasterChildActorType LeafType)
+	{
+		for (SCadWorkflowWizard::FEditableHierarchyNode& Node : Nodes)
+		{
+			if (Node.ActorPath == ActorPath && !Node.bIsBranchNode)
+			{
+				Node.LeafType = LeafType;
+				Node.bIncluded = CadMasterChildActorTypeShouldGenerateJson(LeafType);
+				return true;
+			}
+
+			if (SetEditableNodeLeafTypeRecursive(Node.Children, ActorPath, LeafType))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	bool SetEditableBranchMasterModeRecursive(
+		TArray<SCadWorkflowWizard::FEditableHierarchyNode>& Nodes,
+		const FString& ActorPath,
+		const bool bTreatAsMaster)
+	{
+		for (SCadWorkflowWizard::FEditableHierarchyNode& Node : Nodes)
+		{
+			if (Node.ActorPath == ActorPath && Node.bIsBranchNode)
+			{
+				Node.bTreatAsMaster = bTreatAsMaster;
+				return true;
+			}
+
+			if (SetEditableBranchMasterModeRecursive(Node.Children, ActorPath, bTreatAsMaster))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+}
+
 void SCadWorkflowWizard::Construct(const FArguments& InArgs)
 {
 	Runner = InArgs._Runner;
@@ -59,6 +260,9 @@ void SCadWorkflowWizard::Construct(const FArguments& InArgs)
 	ChildTypeItems.Add(MakeShared<FString>(TEXT("background")));
 	ChildTypeItems.Add(MakeShared<FString>(TEXT("movable")));
 	ChildTypeItems.Add(MakeShared<FString>(TEXT("none")));
+	BranchTypeItems.Reset();
+	BranchTypeItems.Add(MakeShared<FString>(TEXT("master")));
+	BranchTypeItems.Add(MakeShared<FString>(TEXT("none")));
 	JointTypeItems.Reset();
 	JointTypeItems.Add(MakeShared<FString>(TEXT("fixed")));
 	JointTypeItems.Add(MakeShared<FString>(TEXT("revolute")));
@@ -359,7 +563,7 @@ void SCadWorkflowWizard::Construct(const FArguments& InArgs)
 					.Padding(0.0f, 0.0f, 0.0f, 8.0f)
 					[
 						SNew(STextBlock)
-						.Text(FText::FromString(TEXT("Review direct children, use Show / Type, and preview one-level unpack with the button on the right. Unpack is applied only when you press Next.")))
+						.Text(FText::FromString(TEXT("Review the hierarchy tree, choose static/movable/background for leaf nodes, and promote helper branches to sub masters with the button on the right. The tree preview is used for JSON generation.")))
 					]
 
 					+ SVerticalBox::Slot()
@@ -386,7 +590,7 @@ void SCadWorkflowWizard::Construct(const FArguments& InArgs)
 						.VAlign(VAlign_Center)
 						[
 							SNew(STextBlock)
-							.Text(FText::FromString(TEXT("Unpack preview rows are UI-only until Next. Reset restores the original direct-child list.")))
+							.Text(FText::FromString(TEXT("Sub master preview is UI-only until JSON generation. Reset restores the original hierarchy interpretation.")))
 						]
 
 						+ SHorizontalBox::Slot()
@@ -941,35 +1145,47 @@ void SCadWorkflowWizard::RebuildFlattenRows()
 
 void SCadWorkflowWizard::RebuildChildEntriesFromFlattenPreview()
 {
-	TMap<FString, ECadMasterChildActorType> ActorTypesByPath;
-	for (const FCadChildEntry& ChildEntry : ChildEntries)
-	{
-		ActorTypesByPath.Add(ChildEntry.ActorPath, ChildEntry.ActorType);
-	}
-
 	ChildEntries.Reset();
+	ChildEntryIndexByPath.Reset();
 	PreviewPromotedChildActorPaths.Reset();
 	FlattenableChildActorPaths.Reset();
+	EditableHierarchyRoots.Reset();
 
-	AActor* MasterActor = ConfirmedSelection.MasterActor.Get();
-	if (!MasterActor)
+	if (!ConfirmedSelection.MasterActor.IsValid())
 	{
 		return;
 	}
 
-	for (const FCadChildEntry& BaseChildEntry : BaseChildEntries)
+	RebuildEditableHierarchyPreview(LeafTypeOverridesByPath);
+
+	TFunction<void(const FEditableHierarchyNode&)> CollectFlattenablePathsRecursive;
+	CollectFlattenablePathsRecursive = [this, &CollectFlattenablePathsRecursive](const FEditableHierarchyNode& Node)
 	{
-		AppendFlattenPreviewEntriesRecursive(
-			BaseChildEntry,
-			MasterActor,
-			PendingFlattenBranchPaths,
-			ActorTypesByPath,
-			ChildEntries,
-			PreviewPromotedChildActorPaths);
+		if (Node.bCanPromoteToMaster)
+		{
+			FlattenableChildActorPaths.Add(Node.ActorPath);
+		}
+
+		for (const FEditableHierarchyNode& ChildNode : Node.Children)
+		{
+			CollectFlattenablePathsRecursive(ChildNode);
+		}
+	};
+
+	for (const FEditableHierarchyNode& HierarchyRoot : EditableHierarchyRoots)
+	{
+		CollectFlattenablePathsRecursive(HierarchyRoot);
 	}
 
-	for (const FCadChildEntry& ChildEntry : ChildEntries)
+	for (const FEditableHierarchyNode& HierarchyRoot : EditableHierarchyRoots)
 	{
+		FlattenEditableHierarchyNodeRecursive(HierarchyRoot, FTransform::Identity, ChildEntries);
+	}
+
+	for (int32 ChildIndex = 0; ChildIndex < ChildEntries.Num(); ++ChildIndex)
+	{
+		const FCadChildEntry& ChildEntry = ChildEntries[ChildIndex];
+		ChildEntryIndexByPath.Add(ChildEntry.ActorPath, ChildIndex);
 		AActor* ChildActor = CadActorHierarchyUtils::FindByPath(ChildEntry.ActorPath);
 		if (CadActorHierarchyUtils::CanActorFlattenOneLevel(ChildActor))
 		{
@@ -978,20 +1194,36 @@ void SCadWorkflowWizard::RebuildChildEntriesFromFlattenPreview()
 	}
 }
 
-void SCadWorkflowWizard::PreviewFlattenChild(const int32 ChildIndex)
+void SCadWorkflowWizard::RebuildEditableHierarchyPreview(const TMap<FString, ECadMasterChildActorType>& ExistingLeafTypesByPath)
 {
-	if (!ChildEntries.IsValidIndex(ChildIndex))
+	EditableHierarchyRoots.Reset();
+
+	for (const FCadMasterHierarchyNode& HierarchyRoot : ConfirmedSelection.HierarchyChildren)
+	{
+		FEditableHierarchyNode EditableRoot;
+		BuildEditableHierarchyNodeRecursive(
+			HierarchyRoot,
+			VirtualMasterBranchPaths,
+			BranchPathsTreatedAsNone,
+			ExistingLeafTypesByPath,
+			EditableRoot);
+		EditableHierarchyRoots.Add(MoveTemp(EditableRoot));
+	}
+}
+
+void SCadWorkflowWizard::PreviewFlattenChildByPath(const FString& ActorPath)
+{
+	if (ActorPath.TrimStartAndEnd().IsEmpty())
 	{
 		return;
 	}
 
-	const FCadChildEntry SelectedEntry = ChildEntries[ChildIndex];
-	if (!FlattenableChildActorPaths.Contains(SelectedEntry.ActorPath) || PendingFlattenBranchPaths.Contains(SelectedEntry.ActorPath))
+	AActor* BranchActor = CadActorHierarchyUtils::FindByPath(ActorPath);
+	if (!FlattenableChildActorPaths.Contains(ActorPath) || VirtualMasterBranchPaths.Contains(ActorPath) || !BranchActor)
 	{
 		return;
 	}
 
-	AActor* BranchActor = CadActorHierarchyUtils::FindByPath(SelectedEntry.ActorPath);
 	int32 DirectChildCount = 0;
 	if (!CadActorHierarchyUtils::CanActorFlattenOneLevel(BranchActor, &DirectChildCount))
 	{
@@ -1004,7 +1236,7 @@ void SCadWorkflowWizard::PreviewFlattenChild(const int32 ChildIndex)
 			EAppMsgType::OkCancel,
 			FText::FromString(FString::Printf(
 				TEXT("'%s' has %d direct children.\nUnpack preview will replace this row with all of them.\n\nContinue?"),
-				*SelectedEntry.ActorName,
+				*BranchActor->GetActorNameOrLabel(),
 				DirectChildCount)));
 		if (Response != EAppReturnType::Ok)
 		{
@@ -1017,12 +1249,15 @@ void SCadWorkflowWizard::PreviewFlattenChild(const int32 ChildIndex)
 		RestoreChildVisibilityState();
 	}
 
-	PendingFlattenBranchPaths.Add(SelectedEntry.ActorPath);
+	PendingFlattenBranchPaths.Add(ActorPath);
+	VirtualMasterBranchPaths.Add(ActorPath);
+	BranchPathsTreatedAsNone.Remove(ActorPath);
 	SavedVisibility.Reset();
 	IsolatedIndex = INDEX_NONE;
 	RebuildChildEntriesFromFlattenPreview();
 	RebuildChildRows();
 
+	PreviewPromotedChildActorPaths.Reset();
 	TArray<AActor*> PromotedActors;
 	CadActorHierarchyUtils::GetSortedAttachedChildren(BranchActor, PromotedActors, false);
 	TArray<FString> PromotedNames;
@@ -1030,13 +1265,14 @@ void SCadWorkflowWizard::PreviewFlattenChild(const int32 ChildIndex)
 	{
 		if (PromotedActor)
 		{
+			PreviewPromotedChildActorPaths.Add(PromotedActor->GetPathName());
 			PromotedNames.Add(PromotedActor->GetActorNameOrLabel());
 		}
 	}
 
 	SetStatus(FString::Printf(
-		TEXT("Unpack preview updated.\nbranch=%s\npromoted_children=%s\nNext를 누르면 실제 unpack이 적용됩니다."),
-		*SelectedEntry.ActorName,
+		TEXT("Sub master preview updated.\nbranch=%s\nchildren=%s\n타입 선택 단계에서 이 브랜치를 master 트리로 표시합니다."),
+		*BranchActor->GetActorNameOrLabel(),
 		PromotedNames.Num() > 0 ? *FString::Join(PromotedNames, TEXT(", ")) : TEXT("(none)")));
 }
 
@@ -1069,34 +1305,7 @@ bool SCadWorkflowWizard::ApplyPendingFlattenPreview(FString& OutError)
 		return false;
 	}
 
-	TMap<FString, ECadMasterChildActorType> PreviewTypesByPath;
-	for (const FCadChildEntry& PreviewEntry : ChildEntries)
-	{
-		PreviewTypesByPath.Add(PreviewEntry.ActorPath, PreviewEntry.ActorType);
-	}
-
-	FCadMasterSelection UpdatedSelection;
-	if (!CadMasterSelectionCollector::TryCollectFromMasterActor(MasterActor, UpdatedSelection, OutError))
-	{
-		return false;
-	}
-
-	ConfirmedSelection = UpdatedSelection;
-	BaseChildEntries = UpdatedSelection.Children;
-	ChildEntries = BaseChildEntries;
-	for (FCadChildEntry& ChildEntry : ChildEntries)
-	{
-		if (const ECadMasterChildActorType* PreviewType = PreviewTypesByPath.Find(ChildEntry.ActorPath))
-		{
-			ChildEntry.ActorType = *PreviewType;
-		}
-	}
-
 	PendingFlattenBranchPaths.Reset();
-	PreviewPromotedChildActorPaths.Reset();
-	RefreshFlattenBranchCandidates();
-	RebuildChildEntriesFromFlattenPreview();
-	RebuildChildRows();
 	return true;
 }
 
@@ -1111,25 +1320,33 @@ bool SCadWorkflowWizard::TryBuildSelectionForGeneration(FCadMasterSelection& Out
 		return false;
 	}
 
-	if (ChildEntries.Num() == 0)
+	if (EditableHierarchyRoots.Num() == 0)
 	{
-		OutError = TEXT("Confirmed master has no direct children.");
+		OutError = TEXT("Confirmed master has no hierarchy nodes.");
 		return false;
 	}
 
 	OutSelection = ConfirmedSelection;
 	OutSelection.Children.Reset();
-	for (const FCadChildEntry& ChildEntry : ChildEntries)
+	OutSelection.HierarchyChildren.Reset();
+	for (const FEditableHierarchyNode& EditableRoot : EditableHierarchyRoots)
 	{
-		if (CadMasterChildActorTypeShouldGenerateJson(ChildEntry.ActorType))
+		if (!EditableRoot.bIsBranchNode && (!EditableRoot.bIncluded || !CadMasterChildActorTypeShouldGenerateJson(EditableRoot.LeafType)))
 		{
-			OutSelection.Children.Add(ChildEntry);
+			continue;
 		}
+
+		AppendSelectionHierarchyNodesRecursive(EditableRoot, FTransform::Identity, OutSelection.HierarchyChildren);
+	}
+
+	for (const FEditableHierarchyNode& EditableRoot : EditableHierarchyRoots)
+	{
+		FlattenEditableHierarchyNodeRecursive(EditableRoot, FTransform::Identity, OutSelection.Children);
 	}
 
 	if (OutSelection.Children.Num() == 0)
 	{
-		OutError = TEXT("All children are set to 'none'. Select at least one 'static', 'background', or 'movable' child.");
+		OutError = TEXT("All leaf nodes are excluded. Select at least one 'static', 'background', or 'movable' leaf.");
 		return false;
 	}
 
@@ -1219,116 +1436,152 @@ void SCadWorkflowWizard::RebuildChildRows()
 
 	ChildTypeRowsBox->ClearChildren();
 
-	if (ChildEntries.Num() == 0)
+	if (EditableHierarchyRoots.Num() == 0)
 	{
 		ChildTypeRowsBox->AddSlot()
 		.AutoHeight()
 		.Padding(0.0f, 0.0f, 0.0f, 6.0f)
 		[
 			SNew(STextBlock)
-			.Text(FText::FromString(TEXT("No confirmed direct children.")))
+			.Text(FText::FromString(TEXT("No hierarchy nodes are available.")))
 		];
 		return;
 	}
 
-	for (int32 ChildIndex = 0; ChildIndex < ChildEntries.Num(); ++ChildIndex)
+	TFunction<void(const FEditableHierarchyNode&, int32)> AddNodeRowsRecursive;
+	AddNodeRowsRecursive = [this, &AddNodeRowsRecursive](const FEditableHierarchyNode& Node, const int32 Depth)
 	{
-		const FCadChildEntry& ChildEntry = ChildEntries[ChildIndex];
-		const bool bIsPreviewPromoted = PreviewPromotedChildActorPaths.Contains(ChildEntry.ActorPath);
-		const bool bCanPreviewUnpack = FlattenableChildActorPaths.Contains(ChildEntry.ActorPath);
-		const bool bUnpackPending = PendingFlattenBranchPaths.Contains(ChildEntry.ActorPath);
-		const FString InfoText = BuildChildHierarchyInfoLabel(ChildEntry);
+		const int32* ChildIndexPtr = ChildEntryIndexByPath.Find(Node.ActorPath);
+		const int32 ChildIndex = ChildIndexPtr ? *ChildIndexPtr : INDEX_NONE;
+		const bool bIsLeaf = !Node.bIsBranchNode;
+		const bool bCanPreviewUnpack = Node.bCanPromoteToMaster && !Node.bIsBranchNode;
+		const bool bUnpackPending = VirtualMasterBranchPaths.Contains(Node.ActorPath);
+		FCadChildEntry InfoEntry;
+		InfoEntry.ActorName = Node.ActorName;
+		InfoEntry.ActorPath = Node.ActorPath;
+		InfoEntry.RelativeTransform = Node.RelativeTransform;
+		InfoEntry.ActorType = Node.LeafType;
+		const FString InfoText = bIsLeaf
+			? BuildChildHierarchyInfoLabel(InfoEntry)
+			: FString::Printf(TEXT("children=%d"), Node.Children.Num());
 
 		ChildTypeRowsBox->AddSlot()
 		.AutoHeight()
 		.Padding(0.0f, 0.0f, 0.0f, 6.0f)
 		[
-			SNew(SVerticalBox)
+			SNew(SHorizontalBox)
 
-			+ SVerticalBox::Slot()
-			.AutoHeight()
+			+ SHorizontalBox::Slot()
+			.FillWidth(0.45f)
+			.VAlign(VAlign_Center)
+			.Padding(4.0f, 2.0f)
 			[
 				SNew(SHorizontalBox)
 
 				+ SHorizontalBox::Slot()
-				.FillWidth(0.45f)
-				.VAlign(VAlign_Center)
-				.Padding(4.0f, 2.0f)
-				[
-					SNew(SHorizontalBox)
-
-					+ SHorizontalBox::Slot()
-					.FillWidth(1.0f)
-					.VAlign(VAlign_Center)
-					[
-						SNew(STextBlock)
-						.Text(FText::FromString(ChildEntry.ActorName))
-					]
-
-					+ SHorizontalBox::Slot()
-					.AutoWidth()
-					.HAlign(HAlign_Right)
-					.VAlign(VAlign_Center)
-					.Padding(6.0f, 0.0f, 0.0f, 0.0f)
-					[
-						SNew(STextBlock)
-						.Text(FText::FromString(bIsPreviewPromoted ? TEXT("[unpack-preview]") : TEXT("")))
-					]
-				]
-
-				+ SHorizontalBox::Slot()
-				.FillWidth(0.25f)
-				.VAlign(VAlign_Center)
-				.Padding(4.0f, 2.0f)
-				[
-					SNew(STextBlock)
-					.Text(FText::FromString(InfoText))
-				]
-
-				+ SHorizontalBox::Slot()
 				.AutoWidth()
 				.VAlign(VAlign_Center)
-				.Padding(4.0f, 2.0f)
+				.Padding(FMargin(Depth * 16.0f, 0.0f, 6.0f, 0.0f))
 				[
-					SNew(SBox)
-					.WidthOverride(130.0f)
-					[
+					SNew(STextBlock)
+					.Text(FText::FromString(Node.bIsBranchNode ? TEXT("├") : TEXT("•")))
+				]
+
+				+ SHorizontalBox::Slot()
+				.FillWidth(1.0f)
+				.VAlign(VAlign_Center)
+				[
+					SNew(STextBlock)
+					.Text(FText::FromString(FString::Printf(
+						TEXT("%s%s%s"),
+						*Node.ActorName,
+						Node.bIsBranchNode ? (Node.bTreatAsMaster ? TEXT(" [master]") : TEXT(" [none]")) : TEXT(""),
+						PreviewPromotedChildActorPaths.Contains(Node.ActorPath) ? TEXT(" [unpack-preview]") : TEXT(""))))
+				]
+			]
+
+			+ SHorizontalBox::Slot()
+			.FillWidth(0.25f)
+			.VAlign(VAlign_Center)
+			.Padding(4.0f, 2.0f)
+			[
+				SNew(STextBlock)
+				.Text(FText::FromString(InfoText))
+			]
+
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(4.0f, 2.0f)
+			[
+				SNew(SBox)
+				.WidthOverride(130.0f)
+				[
+					Node.bIsBranchNode
+					? StaticCastSharedRef<SWidget>(
+						SNew(SComboBox<TSharedPtr<FString>>)
+						.OptionsSource(&BranchTypeItems)
+						.OnGenerateWidget_Lambda([](const TSharedPtr<FString> Item)
+						{
+							return SNew(STextBlock).Text(FText::FromString(Item.IsValid() ? *Item : TEXT("")));
+						})
+						.OnSelectionChanged_Lambda([this, ActorPath = Node.ActorPath](const TSharedPtr<FString> SelectedType, ESelectInfo::Type)
+						{
+							if (!SelectedType.IsValid())
+							{
+								return;
+							}
+
+							const bool bTreatAsMaster = SelectedType->Equals(TEXT("master"), ESearchCase::IgnoreCase);
+							if (bTreatAsMaster)
+							{
+								BranchPathsTreatedAsNone.Remove(ActorPath);
+							}
+							else
+							{
+								BranchPathsTreatedAsNone.Add(ActorPath);
+							}
+							SetEditableBranchMasterModeRecursive(EditableHierarchyRoots, ActorPath, bTreatAsMaster);
+							RebuildChildEntriesFromFlattenPreview();
+							RebuildChildRows();
+						})
+						[
+							SNew(STextBlock)
+							.Text(FText::FromString(Node.bTreatAsMaster ? TEXT("master") : TEXT("none")))
+						])
+					: StaticCastSharedRef<SWidget>(
 						SNew(SComboBox<TSharedPtr<FString>>)
 						.OptionsSource(&ChildTypeItems)
 						.OnGenerateWidget_Lambda([](const TSharedPtr<FString> Item)
 						{
 							return SNew(STextBlock).Text(FText::FromString(Item.IsValid() ? *Item : TEXT("")));
 						})
-						.OnSelectionChanged_Lambda([this, ChildIndex](const TSharedPtr<FString> SelectedType, ESelectInfo::Type)
+						.OnSelectionChanged_Lambda([this, ActorPath = Node.ActorPath](const TSharedPtr<FString> SelectedType, ESelectInfo::Type)
 						{
 							if (!SelectedType.IsValid())
 							{
 								return;
 							}
-							SetChildType(ChildIndex, *SelectedType);
+
+							SetChildType(ActorPath, *SelectedType);
 						})
 						[
 							SNew(STextBlock)
-							.Text_Lambda([this, ChildIndex]()
-							{
-								if (!ChildEntries.IsValidIndex(ChildIndex))
-								{
-									return FText::FromString(TEXT("static"));
-								}
-								return FText::FromString(CadImportStringUtils::ToMasterChildActorTypeString(ChildEntries[ChildIndex].ActorType));
-							})
-						]
-					]
+							.Text(FText::FromString(ToWorkflowNodeTypeLabel(Node.LeafType)))
+						])
 				]
+			]
 
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.VAlign(VAlign_Center)
-				.Padding(4.0f, 2.0f)
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(4.0f, 2.0f)
+			[
+				SNew(SBox)
+				.WidthOverride(90.0f)
 				[
-					SNew(SBox)
-					.WidthOverride(90.0f)
-					[
+					bIsLeaf && ChildIndex != INDEX_NONE
+					? StaticCastSharedRef<SWidget>(
 						SNew(SButton)
 						.Text_Lambda([this, ChildIndex]()
 						{
@@ -1337,58 +1590,67 @@ void SCadWorkflowWizard::RebuildChildRows()
 						.OnClicked_Lambda([this, ChildIndex]()
 						{
 							return ToggleChildVisibility(ChildIndex);
-						})
-					]
-				]
-
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.VAlign(VAlign_Center)
-				.Padding(4.0f, 2.0f)
-				[
-					SNew(SBox)
-					.WidthOverride(110.0f)
-					[
-						SNew(SButton)
-						.IsEnabled(bCanPreviewUnpack && !bUnpackPending)
-						.Text(FText::FromString(bUnpackPending ? TEXT("Unpacked") : TEXT("Unpack")))
-						.OnClicked_Lambda([this, ChildIndex]()
-						{
-							PreviewFlattenChild(ChildIndex);
-							return FReply::Handled();
-						})
-					]
+						}))
+					: StaticCastSharedRef<SWidget>(
+						SNew(STextBlock)
+						.Text(FText::FromString(TEXT("-"))))
 				]
 			]
 
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 6.0f, 0.0f, 0.0f)
+			+ SHorizontalBox::Slot()
+			.AutoWidth()
+			.VAlign(VAlign_Center)
+			.Padding(4.0f, 2.0f)
 			[
-				SNew(SBorder)
-				.Visibility(ChildIndex + 1 < ChildEntries.Num() ? EVisibility::Visible : EVisibility::Collapsed)
-				.BorderImage(FCoreStyle::Get().GetBrush("WhiteBrush"))
-				.BorderBackgroundColor(FLinearColor(0.25f, 0.25f, 0.25f, 0.7f))
-				.Padding(FMargin(0.0f, 0.5f))
+				SNew(SBox)
+				.WidthOverride(110.0f)
+				[
+					bCanPreviewUnpack
+					? StaticCastSharedRef<SWidget>(
+						SNew(SButton)
+						.IsEnabled(!bUnpackPending)
+						.Text(FText::FromString(bUnpackPending ? TEXT("Master") : TEXT("Sub Master")))
+						.OnClicked_Lambda([this, ActorPath = Node.ActorPath]()
+						{
+							PreviewFlattenChildByPath(ActorPath);
+							return FReply::Handled();
+						}))
+					: StaticCastSharedRef<SWidget>(
+						SNew(STextBlock)
+						.Text(FText::FromString(Node.bIsBranchNode ? TEXT("Applied") : TEXT("-"))))
+				]
 			]
 		];
+
+		for (const FEditableHierarchyNode& ChildNode : Node.Children)
+		{
+			AddNodeRowsRecursive(ChildNode, Depth + 1);
+		}
+	};
+
+	for (const FEditableHierarchyNode& RootNode : EditableHierarchyRoots)
+	{
+		AddNodeRowsRecursive(RootNode, 0);
 	}
 }
 
-void SCadWorkflowWizard::SetChildType(const int32 ChildIndex, const FString& SelectedType)
+void SCadWorkflowWizard::SetChildType(const FString& ActorPath, const FString& SelectedType)
 {
-	if (!ChildEntries.IsValidIndex(ChildIndex))
+	if (ActorPath.TrimStartAndEnd().IsEmpty())
 	{
 		return;
 	}
 
 	ECadMasterChildActorType ParsedType = ECadMasterChildActorType::Static;
-	if (!CadImportStringUtils::TryParseMasterChildActorTypeString(SelectedType, ParsedType, true))
+	if (!TryParseWorkflowNodeTypeLabel(SelectedType, ParsedType))
 	{
 		return;
 	}
 
-	ChildEntries[ChildIndex].ActorType = ParsedType;
+	LeafTypeOverridesByPath.FindOrAdd(ActorPath) = ParsedType;
+	SetEditableNodeLeafTypeRecursive(EditableHierarchyRoots, ActorPath, ParsedType);
+	RebuildChildEntriesFromFlattenPreview();
+	RebuildChildRows();
 }
 
 void SCadWorkflowWizard::SetFlattenBranchSelected(const int32 BranchIndex, const bool bSelected)
@@ -1568,9 +1830,12 @@ FReply SCadWorkflowWizard::ConfirmMaster()
 	ConfirmedSelection = SelectionResult;
 	BaseChildEntries = SelectionResult.Children;
 	ChildEntries.Reset();
+	LeafTypeOverridesByPath.Reset();
 	SavedVisibility.Reset();
 	IsolatedIndex = INDEX_NONE;
 	PendingFlattenBranchPaths.Reset();
+	VirtualMasterBranchPaths.Reset();
+	BranchPathsTreatedAsNone.Reset();
 	PreviewPromotedChildActorPaths.Reset();
 	MasterJsonResult = FCadMasterJsonGenerationResult();
 	ChildJsonResult = FCadChildJsonResult();
@@ -1605,6 +1870,9 @@ FReply SCadWorkflowWizard::ResetFlattenPreview()
 	}
 
 	PendingFlattenBranchPaths.Reset();
+	VirtualMasterBranchPaths.Reset();
+	BranchPathsTreatedAsNone.Reset();
+	LeafTypeOverridesByPath.Reset();
 	PreviewPromotedChildActorPaths.Reset();
 	SavedVisibility.Reset();
 	IsolatedIndex = INDEX_NONE;
@@ -1809,9 +2077,12 @@ FReply SCadWorkflowWizard::RestartWorkflow()
 	FlattenBranchSelections.Reset();
 	FlattenPreviewText = TEXT("Confirm master actor first.");
 	PendingFlattenBranchPaths.Reset();
+	VirtualMasterBranchPaths.Reset();
+	BranchPathsTreatedAsNone.Reset();
 	FlattenableChildActorPaths.Reset();
 	PreviewPromotedChildActorPaths.Reset();
 	ChildEntries.Reset();
+	LeafTypeOverridesByPath.Reset();
 	SavedVisibility.Reset();
 	IsolatedIndex = INDEX_NONE;
 	MasterJsonResult = FCadMasterJsonGenerationResult();

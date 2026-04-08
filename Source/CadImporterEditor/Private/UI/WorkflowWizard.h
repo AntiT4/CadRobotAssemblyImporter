@@ -23,6 +23,19 @@ public:
 		SLATE_ARGUMENT(TSharedPtr<FCadImportService>, Runner)
 	SLATE_END_ARGS()
 
+	struct FEditableHierarchyNode
+	{
+		FString ActorName;
+		FString ActorPath;
+		FTransform RelativeTransform = FTransform::Identity;
+		bool bIsBranchNode = false;
+		bool bTreatAsMaster = false;
+		bool bIncluded = true;
+		bool bCanPromoteToMaster = false;
+		ECadMasterChildActorType LeafType = ECadMasterChildActorType::Static;
+		TArray<FEditableHierarchyNode> Children;
+	};
+
 	void Construct(const FArguments& InArgs);
 
 private:
@@ -53,6 +66,7 @@ private:
 	void RebuildFlattenRows();
 	void RebuildChildEntriesFromFlattenPreview();
 	void RebuildChildRows();
+	void RebuildEditableHierarchyPreview(const TMap<FString, ECadMasterChildActorType>& ExistingLeafTypesByPath);
 	void RebuildJointEditorRows();
 	void LoadEditableJointDocuments(const FCadMasterSelection& SelectionForGeneration, const TArray<FCadChildDoc>& InChildDocuments);
 	void ResetJointEditorState();
@@ -78,10 +92,10 @@ private:
 	void SetJointLimitUpper(const int32 ChildDocIndex, const int32 JointIndex, const float Value);
 	void SetJointLimitEffort(const int32 ChildDocIndex, const int32 JointIndex, const float Value);
 	void SetJointLimitVelocity(const int32 ChildDocIndex, const int32 JointIndex, const float Value);
-	void PreviewFlattenChild(const int32 ChildIndex);
+	void PreviewFlattenChildByPath(const FString& ActorPath);
 	bool ApplyPendingFlattenPreview(FString& OutError);
 	void SetFlattenBranchSelected(const int32 BranchIndex, const bool bSelected);
-	void SetChildType(const int32 ChildIndex, const FString& SelectedType);
+	void SetChildType(const FString& ActorPath, const FString& SelectedType);
 	void SaveChildVisibility();
 	void IsolateChildVisibility(const int32 ChildIndex);
 	void RestoreChildVisibilityState();
@@ -121,15 +135,21 @@ private:
 	FString SelectionKey;
 	int32 StepIndex = 0;
 	TArray<TSharedPtr<FString>> ChildTypeItems;
+	TArray<TSharedPtr<FString>> BranchTypeItems;
 	TArray<TSharedPtr<FString>> JointTypeItems;
 	FCadMasterSelection ConfirmedSelection;
 	TArray<FCadChildEntry> BaseChildEntries;
 	TArray<FCadHierarchyBranchStats> FlattenBranchStats;
 	TArray<bool> FlattenBranchSelections;
 	TSet<FString> PendingFlattenBranchPaths;
+	TSet<FString> VirtualMasterBranchPaths;
+	TSet<FString> BranchPathsTreatedAsNone;
 	TSet<FString> FlattenableChildActorPaths;
 	TSet<FString> PreviewPromotedChildActorPaths;
+	TArray<FEditableHierarchyNode> EditableHierarchyRoots;
 	TArray<FCadChildEntry> ChildEntries;
+	TMap<FString, int32> ChildEntryIndexByPath;
+	TMap<FString, ECadMasterChildActorType> LeafTypeOverridesByPath;
 	TArray<FEditableJointChildState> EditableJointChildren;
 	TMap<FString, bool> SavedVisibility;
 	int32 IsolatedIndex = INDEX_NONE;

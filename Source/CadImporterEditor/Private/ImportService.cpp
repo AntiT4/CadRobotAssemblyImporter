@@ -12,6 +12,9 @@
 #include "Workflow/ChildImportModelBuilder.h"
 #include "Workflow/MasterBlueprintBuilder.h"
 #include "Workflow/WorkflowBuildInputResolver.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "HAL/PlatformFileManager.h"
+#include "Modules/ModuleManager.h"
 
 namespace
 {
@@ -56,6 +59,291 @@ namespace
 			}
 		}
 	}
+
+	void CollectDirectLeafChildrenForBuild(const FCadMasterDoc& MasterDocument, TArray<FCadChildEntry>& OutChildren)
+	{
+		OutChildren.Reset();
+		if (MasterDocument.HierarchyChildren.Num() == 0)
+		{
+			OutChildren = MasterDocument.Children;
+			return;
+		}
+
+		for (const FCadMasterHierarchyNode& Node : MasterDocument.HierarchyChildren)
+		{
+			if (!CadMasterNodeTypeUsesChildJson(Node.NodeType))
+			{
+				continue;
+			}
+
+			FCadChildEntry ChildEntry;
+			ChildEntry.ActorName = Node.ActorName;
+			ChildEntry.ActorPath = Node.ActorPath;
+			ChildEntry.RelativeTransform = Node.RelativeTransform;
+			ChildEntry.ActorType = CadMasterChildActorTypeFromNodeType(Node.NodeType);
+			ChildEntry.ChildJsonFileName = Node.ChildJsonFileName;
+			OutChildren.Add(MoveTemp(ChildEntry));
+		}
+	}
+
+	bool EnsureContentRootReady(const FString& ContentRootPath, FString& OutError)
+	{
+		const FString TrimmedContentRoot = ContentRootPath.TrimStartAndEnd();
+		if (TrimmedContentRoot.IsEmpty())
+		{
+			return true;
+		}
+
+		FString RelativeContentPath = TrimmedContentRoot;
+		if (RelativeContentPath.StartsWith(TEXT("/Game/")))
+		{
+			RelativeContentPath.RightChopInline(6, EAllowShrinking::No);
+		}
+		else if (RelativeContentPath.Equals(TEXT("/Game"), ESearchCase::CaseSensitive))
+		{
+			RelativeContentPath.Reset();
+		}
+
+		const FString ContentDir = RelativeContentPath.IsEmpty()
+			? FPaths::ConvertRelativePathToFull(FPaths::ProjectContentDir())
+			: FPaths::ConvertRelativePathToFull(FPaths::Combine(FPaths::ProjectContentDir(), RelativeContentPath));
+		IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+		if (!PlatformFile.CreateDirectoryTree(*ContentDir))
+		{
+			OutError = FString::Printf(TEXT("Failed to create content directory: %s"), *ContentDir);
+			return false;
+		}
+
+		FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+		TArray<FString> PathsToScan;
+		PathsToScan.Add(TrimmedContentRoot);
+		AssetRegistryModule.Get().ScanPathsSynchronous(PathsToScan, true);
+		return true;
+	}
+
+	FString ResolveDocumentChildJsonFolderPath(const FCadMasterDoc& MasterDocument, const FString& MasterJsonPath)
+	{
+		const FString WorkspaceFolder = MasterDocument.WorkspaceFolder.TrimStartAndEnd().IsEmpty()
+			? FPaths::GetPath(MasterJsonPath)
+			: MasterDocument.WorkspaceFolder;
+		return FPaths::ConvertRelativePathToFull(FPaths::Combine(WorkspaceFolder, MasterDocument.ChildJsonFolderName));
+	}
+
+	FCadWorkflowBuildInput BuildMasterBuildInput(const FCadMasterDoc& MasterDocument, const FString& MasterJsonPath)
+	{
+		FCadWorkflowBuildInput BuildInput;
+		BuildInput.WorkspaceFolder = MasterDocument.WorkspaceFolder;
+		BuildInput.MasterJsonPath = FPaths::ConvertRelativePathToFull(MasterJsonPath);
+		BuildInput.ChildJsonFolderPath = ResolveDocumentChildJsonFolderPath(MasterDocument, MasterJsonPath);
+		BuildInput.ContentRootPath = MasterDocument.ContentRootPath;
+		return BuildInput;
+	}
+
+	FCadMasterDoc BuildInlineNestedMasterDocument(
+		const FCadMasterDoc& ParentDocument,
+		const FCadMasterHierarchyNode& MasterNode,
+		const FString& ParentChildJsonFolderPath)
+	{
+		FCadMasterDoc NestedDocument;
+		NestedDocument.MasterName = MasterNode.ActorName;
+		NestedDocument.MasterActorPath = MasterNode.ActorPath;
+		NestedDocument.MasterWorldTransform = MasterNode.RelativeTransform * ParentDocument.MasterWorldTransform;
+		NestedDocument.WorkspaceFolder = ParentChildJsonFolderPath;
+		NestedDocument.ChildJsonFolderName = MasterNode.ChildJsonFolderName.TrimStartAndEnd().IsEmpty()
+			? FPaths::MakeValidFileName(MasterNode.ActorName)
+			: MasterNode.ChildJsonFolderName;
+		if (NestedDocument.ChildJsonFolderName.IsEmpty())
+		{
+			NestedDocument.ChildJsonFolderName = TEXT("Master");
+		}
+		NestedDocument.ContentRootPath = ParentDocument.ContentRootPath.TrimStartAndEnd().IsEmpty()
+			? FString::Printf(TEXT("/Game/%s"), *NestedDocument.ChildJsonFolderName)
+			: FString::Printf(TEXT("%s/%s"), *ParentDocument.ContentRootPath, *NestedDocument.ChildJsonFolderName);
+		NestedDocument.HierarchyChildren = MasterNode.Children;
+		CollectDirectLeafChildrenForBuild(NestedDocument, NestedDocument.Children);
+		return NestedDocument;
+	}
+
+	bool TryBuildMasterBlueprintsRecursive(
+		const FCadMasterDoc& MasterDocument,
+		const FString& MasterJsonPath,
+		TMap<FString, UBlueprint*>& InOutMasterBlueprintsByJsonPath,
+		FString& OutError)
+	{
+		const FString NormalizedMasterJsonPath = FPaths::ConvertRelativePathToFull(MasterJsonPath);
+		if (!EnsureContentRootReady(MasterDocument.ContentRootPath, OutError))
+		{
+			return false;
+		}
+
+		UBlueprint* MasterBlueprint = nullptr;
+		if (!CadMasterBlueprintBuilder::TryBuildBlueprint(
+			MasterDocument,
+			BuildMasterBuildInput(MasterDocument, NormalizedMasterJsonPath),
+			MasterBlueprint,
+			OutError))
+		{
+			return false;
+		}
+
+		InOutMasterBlueprintsByJsonPath.Add(NormalizedMasterJsonPath, MasterBlueprint);
+
+		const FString ChildJsonFolderPath = ResolveDocumentChildJsonFolderPath(MasterDocument, NormalizedMasterJsonPath);
+		for (const FCadMasterHierarchyNode& Node : MasterDocument.HierarchyChildren)
+		{
+			if (Node.NodeType != ECadMasterNodeType::Master)
+			{
+				continue;
+			}
+
+			FCadMasterDoc NestedMasterDocument;
+			FString NestedMasterJsonPath;
+			if (!Node.MasterJsonFileName.TrimStartAndEnd().IsEmpty())
+			{
+				NestedMasterJsonPath = FPaths::ConvertRelativePathToFull(FPaths::Combine(ChildJsonFolderPath, Node.MasterJsonFileName));
+				if (!CadChildDocExporter::TryParseMasterDocument(NestedMasterJsonPath, NestedMasterDocument, OutError))
+				{
+					return false;
+				}
+			}
+			else if (Node.Children.Num() > 0)
+			{
+				NestedMasterJsonPath = FPaths::Combine(ChildJsonFolderPath, FString::Printf(TEXT("%s.json"), *FPaths::MakeValidFileName(Node.ActorName)));
+				NestedMasterDocument = BuildInlineNestedMasterDocument(MasterDocument, Node, ChildJsonFolderPath);
+			}
+			else
+			{
+				continue;
+			}
+
+			if (!TryBuildMasterBlueprintsRecursive(
+				NestedMasterDocument,
+				NestedMasterJsonPath,
+				InOutMasterBlueprintsByJsonPath,
+				OutError))
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	bool TryBuildChildBlueprintsRecursive(
+		const FCadMasterDoc& MasterDocument,
+		const FString& MasterJsonPath,
+		const FString& DefaultContentRootPath,
+		TMap<FString, UBlueprint*>& InOutChildBlueprintsByJsonPath,
+		FString& OutError)
+	{
+		const FString ChildJsonFolderPath = ResolveDocumentChildJsonFolderPath(MasterDocument, MasterJsonPath);
+		const FString ChildBlueprintOutputRoot = MasterDocument.ContentRootPath.TrimStartAndEnd().IsEmpty()
+			? DefaultContentRootPath
+			: MasterDocument.ContentRootPath.TrimStartAndEnd();
+		if (!EnsureContentRootReady(ChildBlueprintOutputRoot, OutError))
+		{
+			return false;
+		}
+
+		TArray<FCadChildEntry> DirectLeafChildren;
+		CollectDirectLeafChildrenForBuild(MasterDocument, DirectLeafChildren);
+		for (const FCadChildEntry& ChildEntry : DirectLeafChildren)
+		{
+			const FString ChildName = ChildEntry.ActorName.TrimStartAndEnd();
+			const FString ChildJsonFileName = ChildEntry.ChildJsonFileName.TrimStartAndEnd();
+			if (ChildName.IsEmpty())
+			{
+				OutError = TEXT("Child actor_name is empty.");
+				return false;
+			}
+			if (ChildJsonFileName.IsEmpty())
+			{
+				OutError = FString::Printf(TEXT("child_json_file_name is empty for child '%s'."), *ChildName);
+				return false;
+			}
+
+			const FString ChildJsonPath = FPaths::ConvertRelativePathToFull(FPaths::Combine(ChildJsonFolderPath, ChildJsonFileName));
+			FCadChildDoc ChildDocument;
+			if (!CadChildDocParser::TryLoadChildDocumentFromJsonPath(ChildJsonPath, ChildDocument, OutError))
+			{
+				return false;
+			}
+
+			if (ChildDocument.ChildActorName.TrimStartAndEnd().IsEmpty())
+			{
+				ChildDocument.ChildActorName = ChildName;
+			}
+
+			FCadImportModel ChildModel;
+			if (!CadChildImportModelBuilder::TryBuildImportModel(
+				MasterDocument,
+				ChildEntry,
+				ChildDocument,
+				ChildJsonFolderPath,
+				ChildBlueprintOutputRoot,
+				ChildModel,
+				OutError))
+			{
+				return false;
+			}
+
+			UBlueprint* ChildBlueprint = nullptr;
+			if (!CadImportExecutor::TryImportModel(ChildModel, ChildJsonPath, &ChildBlueprint, OutError))
+			{
+				return false;
+			}
+
+			ApplyBackgroundTagToBlueprint(ChildBlueprint, ChildEntry.ActorType == ECadMasterChildActorType::Background);
+			InOutChildBlueprintsByJsonPath.Add(ChildJsonPath, ChildBlueprint);
+			UE_LOG(
+				LogCadImporter,
+				Display,
+				TEXT("Built child blueprint from json. child=%s json=%s blueprint=%s"),
+				*ChildName,
+				*ChildJsonPath,
+				ChildBlueprint ? *ChildBlueprint->GetPathName() : TEXT("(null)"));
+		}
+
+		for (const FCadMasterHierarchyNode& Node : MasterDocument.HierarchyChildren)
+		{
+			if (Node.NodeType != ECadMasterNodeType::Master)
+			{
+				continue;
+			}
+
+			FCadMasterDoc NestedMasterDocument;
+			FString NestedMasterJsonPath;
+			if (!Node.MasterJsonFileName.TrimStartAndEnd().IsEmpty())
+			{
+				NestedMasterJsonPath = FPaths::ConvertRelativePathToFull(FPaths::Combine(ChildJsonFolderPath, Node.MasterJsonFileName));
+				if (!CadChildDocExporter::TryParseMasterDocument(NestedMasterJsonPath, NestedMasterDocument, OutError))
+				{
+					return false;
+				}
+			}
+			else if (Node.Children.Num() > 0)
+			{
+				NestedMasterJsonPath = FPaths::Combine(ChildJsonFolderPath, FString::Printf(TEXT("%s.json"), *FPaths::MakeValidFileName(Node.ActorName)));
+				NestedMasterDocument = BuildInlineNestedMasterDocument(MasterDocument, Node, ChildJsonFolderPath);
+			}
+			else
+			{
+				continue;
+			}
+
+			if (!TryBuildChildBlueprintsRecursive(
+				NestedMasterDocument,
+				NestedMasterJsonPath,
+				ChildBlueprintOutputRoot,
+				InOutChildBlueprintsByJsonPath,
+				OutError))
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
 }
 
 bool FCadImportService::BuildFromWorkflow(
@@ -85,86 +373,30 @@ bool FCadImportService::BuildFromWorkflow(
 	ResolvedBuildInput = CadWorkflowBuildInputResolver::Resolve(ResolvedBuildInput, MasterDocument);
 	const FString ChildBlueprintOutputRoot = ResolvedBuildInput.ContentRootPath.TrimStartAndEnd();
 
-	UBlueprint* MasterBlueprint = nullptr;
-	if (!CadMasterBlueprintBuilder::TryBuildBlueprint(MasterDocument, ResolvedBuildInput, MasterBlueprint, Error))
+	TMap<FString, UBlueprint*> MasterBlueprintsByJsonPath;
+	if (!TryBuildMasterBlueprintsRecursive(MasterDocument, MasterJsonPath, MasterBlueprintsByJsonPath, Error))
 	{
 		return ReportFailure(TEXT("Master blueprint generation failed"), TEXT("Master blueprint generation failed"), Error);
 	}
-
-	TMap<FString, UBlueprint*> ChildBlueprintsByChildName;
-	for (const FCadChildEntry& ChildEntry : MasterDocument.Children)
+	UBlueprint* const* RootMasterBlueprintPtr = MasterBlueprintsByJsonPath.Find(FPaths::ConvertRelativePathToFull(MasterJsonPath));
+	UBlueprint* MasterBlueprint = RootMasterBlueprintPtr ? *RootMasterBlueprintPtr : nullptr;
+	if (!MasterBlueprint)
 	{
-		const FString ChildName = ChildEntry.ActorName.TrimStartAndEnd();
-		const FString ChildJsonFileName = ChildEntry.ChildJsonFileName.TrimStartAndEnd();
-		if (ChildName.IsEmpty())
-		{
-			return ReportFailure(TEXT("Master workflow parse failed"), TEXT("Master workflow parse failed"), TEXT("Child actor_name is empty."));
-		}
-		if (ChildJsonFileName.IsEmpty())
-		{
-			return ReportFailure(
-				TEXT("Master workflow parse failed"),
-				TEXT("Master workflow parse failed"),
-				FString::Printf(TEXT("child_json_file_name is empty for child '%s'."), *ChildName));
-		}
+		return ReportFailure(TEXT("Master blueprint generation failed"), TEXT("Master blueprint generation failed"), TEXT("Root master blueprint lookup failed."));
+	}
 
-		const FString ChildJsonPath = FPaths::ConvertRelativePathToFull(FPaths::Combine(ResolvedBuildInput.ChildJsonFolderPath, ChildJsonFileName));
-		FCadChildDoc ChildDocument;
-		if (!CadChildDocParser::TryLoadChildDocumentFromJsonPath(ChildJsonPath, ChildDocument, Error))
-		{
-			return ReportFailure(
-				TEXT("Failed to load child json"),
-				FString::Printf(TEXT("Failed to load child json for '%s'"), *ChildName),
-				Error);
-		}
-
-		if (ChildDocument.ChildActorName.TrimStartAndEnd().IsEmpty())
-		{
-			ChildDocument.ChildActorName = ChildName;
-		}
-
-		FCadImportModel ChildModel;
-		if (!CadChildImportModelBuilder::TryBuildImportModel(
-			MasterDocument,
-			ChildEntry,
-			ChildDocument,
-			ResolvedBuildInput.ChildJsonFolderPath,
-			ChildBlueprintOutputRoot,
-			ChildModel,
-			Error))
-		{
-			return ReportFailure(
-				TEXT("Child model build failed"),
-				FString::Printf(TEXT("Child model build failed for '%s'"), *ChildName),
-				Error);
-		}
-
-		UBlueprint* ChildBlueprint = nullptr;
-		if (!CadImportExecutor::TryImportModel(ChildModel, ChildJsonPath, &ChildBlueprint, Error))
-		{
-			return ReportFailure(
-				TEXT("Child blueprint build failed"),
-				FString::Printf(TEXT("Child blueprint build failed for '%s'"), *ChildName),
-				Error);
-		}
-
-		ApplyBackgroundTagToBlueprint(ChildBlueprint, ChildEntry.ActorType == ECadMasterChildActorType::Background);
-
-		ChildBlueprintsByChildName.Add(ChildName, ChildBlueprint);
-		UE_LOG(
-			LogCadImporter,
-			Display,
-			TEXT("Built child blueprint from json. child=%s json=%s blueprint=%s"),
-			*ChildName,
-			*ChildJsonPath,
-			ChildBlueprint ? *ChildBlueprint->GetPathName() : TEXT("(null)"));
+	TMap<FString, UBlueprint*> ChildBlueprintsByJsonPath;
+	if (!TryBuildChildBlueprintsRecursive(MasterDocument, MasterJsonPath, ChildBlueprintOutputRoot, ChildBlueprintsByJsonPath, Error))
+	{
+		return ReportFailure(TEXT("Child blueprint build failed"), TEXT("Child blueprint build failed"), Error);
 	}
 
 	FCadLevelReplaceResult ReplaceResult;
 	if (!CadLevelReplacer::TryReplaceMasterHierarchyWithBlueprints(
 		MasterDocument,
 		MasterBlueprint,
-		ChildBlueprintsByChildName,
+		MasterBlueprintsByJsonPath,
+		ChildBlueprintsByJsonPath,
 		ReplaceResult,
 		Error))
 	{

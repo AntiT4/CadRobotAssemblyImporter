@@ -50,6 +50,52 @@ namespace CadImportStringUtils
 		return false;
 	}
 
+	FString ToMasterNodeTypeString(const ECadMasterNodeType NodeType)
+	{
+		switch (NodeType)
+		{
+		case ECadMasterNodeType::Background:
+			return TEXT("background");
+		case ECadMasterNodeType::Robot:
+			return TEXT("robot");
+		case ECadMasterNodeType::Master:
+			return TEXT("master");
+		case ECadMasterNodeType::Static:
+		default:
+			return TEXT("static");
+		}
+	}
+
+	bool TryParseMasterNodeTypeString(const FString& RawType, ECadMasterNodeType& OutType)
+	{
+		if (RawType.Equals(TEXT("background"), ESearchCase::IgnoreCase))
+		{
+			OutType = ECadMasterNodeType::Background;
+			return true;
+		}
+
+		if (RawType.Equals(TEXT("robot"), ESearchCase::IgnoreCase) ||
+			RawType.Equals(TEXT("movable"), ESearchCase::IgnoreCase))
+		{
+			OutType = ECadMasterNodeType::Robot;
+			return true;
+		}
+
+		if (RawType.Equals(TEXT("master"), ESearchCase::IgnoreCase))
+		{
+			OutType = ECadMasterNodeType::Master;
+			return true;
+		}
+
+		if (RawType.Equals(TEXT("static"), ESearchCase::IgnoreCase))
+		{
+			OutType = ECadMasterNodeType::Static;
+			return true;
+		}
+
+		return false;
+	}
+
 	FString ToJointTypeString(const ECadImportJointType JointType)
 	{
 		switch (JointType)

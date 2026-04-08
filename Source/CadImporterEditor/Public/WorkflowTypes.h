@@ -16,6 +16,55 @@ inline bool CadMasterChildActorTypeShouldGenerateJson(const ECadMasterChildActor
 	return ActorType != ECadMasterChildActorType::None;
 }
 
+enum class ECadMasterNodeType : uint8
+{
+	Static,
+	Background,
+	Robot,
+	Master
+};
+
+inline ECadMasterNodeType CadMasterNodeTypeFromChildActorType(const ECadMasterChildActorType ActorType)
+{
+	switch (ActorType)
+	{
+	case ECadMasterChildActorType::Background:
+		return ECadMasterNodeType::Background;
+	case ECadMasterChildActorType::Movable:
+		return ECadMasterNodeType::Robot;
+	case ECadMasterChildActorType::None:
+	case ECadMasterChildActorType::Static:
+	default:
+		return ECadMasterNodeType::Static;
+	}
+}
+
+inline ECadMasterChildActorType CadMasterChildActorTypeFromNodeType(const ECadMasterNodeType NodeType)
+{
+	switch (NodeType)
+	{
+	case ECadMasterNodeType::Background:
+		return ECadMasterChildActorType::Background;
+	case ECadMasterNodeType::Robot:
+		return ECadMasterChildActorType::Movable;
+	case ECadMasterNodeType::Master:
+		return ECadMasterChildActorType::None;
+	case ECadMasterNodeType::Static:
+	default:
+		return ECadMasterChildActorType::Static;
+	}
+}
+
+inline bool CadMasterNodeTypeUsesChildJson(const ECadMasterNodeType NodeType)
+{
+	return NodeType != ECadMasterNodeType::Master;
+}
+
+inline bool CadMasterNodeTypeAllowsChildren(const ECadMasterNodeType NodeType)
+{
+	return NodeType == ECadMasterNodeType::Master;
+}
+
 struct FCadChildEntry
 {
 	FString ActorName;
@@ -23,6 +72,18 @@ struct FCadChildEntry
 	FTransform RelativeTransform = FTransform::Identity;
 	ECadMasterChildActorType ActorType = ECadMasterChildActorType::Static;
 	FString ChildJsonFileName;
+};
+
+struct FCadMasterHierarchyNode
+{
+	FString ActorName;
+	FString ActorPath;
+	FTransform RelativeTransform = FTransform::Identity;
+	ECadMasterNodeType NodeType = ECadMasterNodeType::Static;
+	FString ChildJsonFileName;
+	FString MasterJsonFileName;
+	FString ChildJsonFolderName;
+	TArray<FCadMasterHierarchyNode> Children;
 };
 
 struct FCadMasterDoc
@@ -33,6 +94,7 @@ struct FCadMasterDoc
 	FString WorkspaceFolder;
 	FString ChildJsonFolderName;
 	FString ContentRootPath;
+	TArray<FCadMasterHierarchyNode> HierarchyChildren;
 	TArray<FCadChildEntry> Children;
 };
 

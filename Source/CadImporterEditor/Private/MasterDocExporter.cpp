@@ -5,6 +5,7 @@
 #include "Json/CadJsonTransformUtils.h"
 #include "MasterSelectionCollector.h"
 #include "Dom/JsonObject.h"
+#include "HAL/PlatformFileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonSerializer.h"
@@ -12,22 +13,77 @@
 
 namespace
 {
-	TSharedPtr<FJsonObject> MakeMasterChildObject(const FCadChildEntry& ChildEntry)
+	FCadMasterHierarchyNode BuildMasterDocHierarchyNodeFromChildEntry(const FCadChildEntry& ChildEntry)
+	{
+		FCadMasterHierarchyNode Node;
+		Node.ActorName = ChildEntry.ActorName;
+		Node.ActorPath = ChildEntry.ActorPath;
+		Node.RelativeTransform = ChildEntry.RelativeTransform;
+		Node.NodeType = CadMasterNodeTypeFromChildActorType(ChildEntry.ActorType);
+		Node.ChildJsonFileName = ChildEntry.ChildJsonFileName;
+		return Node;
+	}
+
+	TArray<FCadMasterHierarchyNode> BuildMasterDocHierarchyNodesFromFlatChildren(const TArray<FCadChildEntry>& Children)
+	{
+		TArray<FCadMasterHierarchyNode> HierarchyNodes;
+		HierarchyNodes.Reserve(Children.Num());
+		for (const FCadChildEntry& ChildEntry : Children)
+		{
+			if (!CadMasterChildActorTypeShouldGenerateJson(ChildEntry.ActorType))
+			{
+				continue;
+			}
+
+			HierarchyNodes.Add(BuildMasterDocHierarchyNodeFromChildEntry(ChildEntry));
+		}
+
+		return HierarchyNodes;
+	}
+
+	TSharedPtr<FJsonObject> MakeMasterChildObject(const FCadMasterHierarchyNode& ChildNode)
 	{
 		TSharedPtr<FJsonObject> ChildObject = MakeShared<FJsonObject>();
-		ChildObject->SetStringField(TEXT("actor_name"), ChildEntry.ActorName);
-		if (CadMasterChildActorTypeShouldGenerateJson(ChildEntry.ActorType))
+		ChildObject->SetStringField(TEXT("actor_name"), ChildNode.ActorName);
+		if (!ChildNode.ActorPath.TrimStartAndEnd().IsEmpty())
 		{
-			ChildObject->SetStringField(TEXT("actor_type"), CadImportStringUtils::ToMasterChildActorTypeString(ChildEntry.ActorType));
+			ChildObject->SetStringField(TEXT("actor_path"), ChildNode.ActorPath);
 		}
-		ChildObject->SetStringField(TEXT("child_json_file_name"), ChildEntry.ChildJsonFileName);
-		ChildObject->SetObjectField(TEXT("relative_transform"), CadJsonTransformUtils::MakeTransformObject(ChildEntry.RelativeTransform));
+		ChildObject->SetStringField(TEXT("node_type"), CadImportStringUtils::ToMasterNodeTypeString(ChildNode.NodeType));
+		ChildObject->SetObjectField(TEXT("relative_transform"), CadJsonTransformUtils::MakeTransformObject(ChildNode.RelativeTransform));
+
+		if (CadMasterNodeTypeUsesChildJson(ChildNode.NodeType))
+		{
+			ChildObject->SetStringField(
+				TEXT("actor_type"),
+				CadImportStringUtils::ToMasterChildActorTypeString(CadMasterChildActorTypeFromNodeType(ChildNode.NodeType)));
+			ChildObject->SetStringField(TEXT("child_json_file_name"), ChildNode.ChildJsonFileName);
+		}
+		else
+		{
+			if (!ChildNode.MasterJsonFileName.TrimStartAndEnd().IsEmpty())
+			{
+				ChildObject->SetStringField(TEXT("master_json_file_name"), ChildNode.MasterJsonFileName);
+			}
+			if (!ChildNode.ChildJsonFolderName.TrimStartAndEnd().IsEmpty())
+			{
+				ChildObject->SetStringField(TEXT("child_json_folder_name"), ChildNode.ChildJsonFolderName);
+			}
+		}
+
+		TArray<TSharedPtr<FJsonValue>> ChildValues;
+		for (const FCadMasterHierarchyNode& NestedChildNode : ChildNode.Children)
+		{
+			ChildValues.Add(MakeShared<FJsonValueObject>(MakeMasterChildObject(NestedChildNode)));
+		}
+		ChildObject->SetArrayField(TEXT("children"), ChildValues);
 		return ChildObject;
 	}
 
 	bool TrySerializeMasterDocument(const FCadMasterDoc& Document, FString& OutJson, FString& OutError)
 	{
 		TSharedPtr<FJsonObject> RootObject = MakeShared<FJsonObject>();
+		RootObject->SetStringField(TEXT("schema_version"), TEXT("master_json_v2"));
 		RootObject->SetStringField(TEXT("master_name"), Document.MasterName);
 		RootObject->SetStringField(TEXT("master_actor_path"), Document.MasterActorPath);
 		RootObject->SetObjectField(TEXT("master_world_transform"), CadJsonTransformUtils::MakeTransformObject(Document.MasterWorldTransform));
@@ -35,15 +91,13 @@ namespace
 		RootObject->SetStringField(TEXT("child_json_folder_name"), Document.ChildJsonFolderName);
 		RootObject->SetStringField(TEXT("content_root_path"), Document.ContentRootPath);
 
+		const TArray<FCadMasterHierarchyNode> HierarchyChildren = Document.HierarchyChildren.Num() > 0
+			? Document.HierarchyChildren
+			: BuildMasterDocHierarchyNodesFromFlatChildren(Document.Children);
 		TArray<TSharedPtr<FJsonValue>> ChildValues;
-		for (const FCadChildEntry& ChildEntry : Document.Children)
+		for (const FCadMasterHierarchyNode& ChildNode : HierarchyChildren)
 		{
-			if (!CadMasterChildActorTypeShouldGenerateJson(ChildEntry.ActorType))
-			{
-				continue;
-			}
-
-			ChildValues.Add(MakeShared<FJsonValueObject>(MakeMasterChildObject(ChildEntry)));
+			ChildValues.Add(MakeShared<FJsonValueObject>(MakeMasterChildObject(ChildNode)));
 		}
 		RootObject->SetArrayField(TEXT("children"), ChildValues);
 
@@ -88,28 +142,126 @@ namespace
 		return FString();
 	}
 
-	bool TryBuildDocument(
-		AActor& MasterActor,
-		const FCadMasterSelection& SelectionResult,
-		const FCadWorkspacePaths& WorkspacePaths,
+	bool EnsureMasterExportDirectoryExists(const FString& DirectoryPath, FString& OutError)
+	{
+		IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+		if (PlatformFile.CreateDirectoryTree(*DirectoryPath))
+		{
+			return true;
+		}
+
+		OutError = FString::Printf(TEXT("Failed to create directory: %s"), *DirectoryPath);
+		return false;
+	}
+
+	FString MakeSafeMasterPathName(const FString& MasterName)
+	{
+		const FString SafeName = FPaths::MakeValidFileName(MasterName.TrimStartAndEnd());
+		return SafeName.IsEmpty() ? TEXT("Master") : SafeName;
+	}
+
+	FString BuildNestedContentRootPath(const FString& ParentContentRootPath, const FString& SafeMasterName)
+	{
+		const FString TrimmedParent = ParentContentRootPath.TrimStartAndEnd();
+		if (TrimmedParent.IsEmpty())
+		{
+			return FString::Printf(TEXT("/Game/%s"), *SafeMasterName);
+		}
+
+		return FString::Printf(TEXT("%s/%s"), *TrimmedParent, *SafeMasterName);
+	}
+
+	void AddDirectLeafChildToDocument(const FCadMasterHierarchyNode& SourceChildNode, FCadMasterDoc& InOutDocument)
+	{
+		FCadMasterHierarchyNode DirectChildNode = SourceChildNode;
+		DirectChildNode.Children.Reset();
+		DirectChildNode.MasterJsonFileName.Reset();
+		DirectChildNode.ChildJsonFolderName.Reset();
+		InOutDocument.HierarchyChildren.Add(DirectChildNode);
+
+		if (!CadMasterNodeTypeUsesChildJson(SourceChildNode.NodeType))
+		{
+			return;
+		}
+
+		FCadChildEntry ChildEntry;
+		ChildEntry.ActorName = SourceChildNode.ActorName;
+		ChildEntry.ActorPath = SourceChildNode.ActorPath;
+		ChildEntry.RelativeTransform = SourceChildNode.RelativeTransform;
+		ChildEntry.ActorType = CadMasterChildActorTypeFromNodeType(SourceChildNode.NodeType);
+		ChildEntry.ChildJsonFileName = SourceChildNode.ChildJsonFileName;
+		InOutDocument.Children.Add(MoveTemp(ChildEntry));
+	}
+
+	bool TryBuildAndWriteMasterDocumentRecursive(
+		const FString& MasterName,
+		const FString& MasterActorPath,
+		const FTransform& MasterWorldTransform,
+		const TArray<FCadMasterHierarchyNode>& SourceChildren,
+		const FString& WorkspaceFolder,
+		const FString& ChildJsonFolderName,
+		const FString& ContentRootPath,
+		const FString& MasterJsonPath,
 		FCadMasterDoc& OutDocument,
 		FString& OutError)
 	{
-		if (!SelectionResult.IsValid())
+		const FString ChildJsonFolderPath = FPaths::Combine(WorkspaceFolder, ChildJsonFolderName);
+		if (!EnsureMasterExportDirectoryExists(WorkspaceFolder, OutError) || !EnsureMasterExportDirectoryExists(ChildJsonFolderPath, OutError))
 		{
-			OutError = TEXT("Master actor selection result is invalid.");
 			return false;
 		}
 
 		OutDocument = FCadMasterDoc();
-		OutDocument.MasterName = WorkspacePaths.MasterName;
-		OutDocument.MasterActorPath = MasterActor.GetPathName();
-		OutDocument.MasterWorldTransform = MasterActor.GetActorTransform();
-		OutDocument.WorkspaceFolder = WorkspacePaths.WorkspaceFolder;
-		OutDocument.ChildJsonFolderName = FPaths::GetCleanFilename(WorkspacePaths.ChildJsonFolderPath);
-		OutDocument.ContentRootPath = WorkspacePaths.ContentRootPath;
-		OutDocument.Children = SelectionResult.Children;
-		return true;
+		OutDocument.MasterName = MasterName;
+		OutDocument.MasterActorPath = MasterActorPath;
+		OutDocument.MasterWorldTransform = MasterWorldTransform;
+		OutDocument.WorkspaceFolder = WorkspaceFolder;
+		OutDocument.ChildJsonFolderName = ChildJsonFolderName;
+		OutDocument.ContentRootPath = ContentRootPath;
+
+		for (const FCadMasterHierarchyNode& SourceChildNode : SourceChildren)
+		{
+			if (SourceChildNode.NodeType != ECadMasterNodeType::Master)
+			{
+				AddDirectLeafChildToDocument(SourceChildNode, OutDocument);
+				continue;
+			}
+
+			const FString NestedMasterName = SourceChildNode.ActorName.TrimStartAndEnd().IsEmpty()
+				? TEXT("Master")
+				: SourceChildNode.ActorName;
+			const FString SafeNestedMasterName = MakeSafeMasterPathName(NestedMasterName);
+			const FString NestedMasterJsonFileName = FString::Printf(TEXT("%s.json"), *SafeNestedMasterName);
+			const FString NestedChildJsonFolderName = SafeNestedMasterName;
+			const FString NestedWorkspaceFolder = ChildJsonFolderPath;
+			const FString NestedMasterJsonPath = FPaths::Combine(NestedWorkspaceFolder, NestedMasterJsonFileName);
+			const FString NestedContentRootPath = BuildNestedContentRootPath(ContentRootPath, SafeNestedMasterName);
+
+			FCadMasterDoc NestedMasterDocument;
+			if (!TryBuildAndWriteMasterDocumentRecursive(
+				NestedMasterName,
+				SourceChildNode.ActorPath,
+				SourceChildNode.RelativeTransform * MasterWorldTransform,
+				SourceChildNode.Children,
+				NestedWorkspaceFolder,
+				NestedChildJsonFolderName,
+				NestedContentRootPath,
+				NestedMasterJsonPath,
+				NestedMasterDocument,
+				OutError))
+			{
+				return false;
+			}
+
+			FCadMasterHierarchyNode MasterReferenceNode = SourceChildNode;
+			MasterReferenceNode.ChildJsonFileName.Reset();
+			MasterReferenceNode.MasterJsonFileName = NestedMasterJsonFileName;
+			MasterReferenceNode.ChildJsonFolderName = NestedChildJsonFolderName;
+			MasterReferenceNode.Children.Reset();
+			OutDocument.HierarchyChildren.Add(MoveTemp(MasterReferenceNode));
+		}
+
+		return CadMasterDocExporter::TryWriteDocument(OutDocument, MasterJsonPath, OutError);
 	}
 
 	bool TryGenerateInternal(
@@ -128,13 +280,22 @@ namespace
 			return false;
 		}
 
-		FCadMasterDoc Document;
-		if (!TryBuildDocument(MasterActor, SelectionResult, WorkspacePaths, Document, OutError))
-		{
-			return false;
-		}
+		const TArray<FCadMasterHierarchyNode> RootSourceChildren = SelectionResult.HierarchyChildren.Num() > 0
+			? SelectionResult.HierarchyChildren
+			: BuildMasterDocHierarchyNodesFromFlatChildren(SelectionResult.Children);
 
-		if (!CadMasterDocExporter::TryWriteDocument(Document, WorkspacePaths.MasterJsonPath, OutError))
+		FCadMasterDoc Document;
+		if (!TryBuildAndWriteMasterDocumentRecursive(
+			WorkspacePaths.MasterName,
+			MasterActor.GetPathName(),
+			MasterActor.GetActorTransform(),
+			RootSourceChildren,
+			WorkspacePaths.WorkspaceFolder,
+			FPaths::GetCleanFilename(WorkspacePaths.ChildJsonFolderPath),
+			WorkspacePaths.ContentRootPath,
+			WorkspacePaths.MasterJsonPath,
+			Document,
+			OutError))
 		{
 			return false;
 		}

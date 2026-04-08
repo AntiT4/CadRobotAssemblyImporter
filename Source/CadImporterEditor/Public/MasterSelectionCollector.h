@@ -24,6 +24,7 @@ struct FCadHierarchyIssueInfo
 struct FCadMasterSelection
 {
 	TWeakObjectPtr<AActor> MasterActor;
+	TArray<FCadMasterHierarchyNode> HierarchyChildren;
 	TArray<FCadChildEntry> Children;
 	TArray<FCadHierarchyIssueInfo> Issues;
 

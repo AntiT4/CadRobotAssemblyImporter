@@ -8,6 +8,15 @@ class ACadRobotActor;
 class ATcpSocketConnection;
 class USceneComponent;
 
+UENUM(BlueprintType)
+enum class ECadMasterPlacementNodeType : uint8
+{
+	Static UMETA(DisplayName = "Static"),
+	Background UMETA(DisplayName = "Background"),
+	Robot UMETA(DisplayName = "Robot"),
+	Master UMETA(DisplayName = "Master")
+};
+
 USTRUCT(BlueprintType)
 struct CADIMPORTER_API FCadMasterActorMetadata
 {
@@ -23,7 +32,7 @@ struct CADIMPORTER_API FCadMasterActorMetadata
 	FString Description;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CAD Master|Metadata")
-	FString SchemaVersion = TEXT("master_json_v1");
+	FString SchemaVersion = TEXT("master_json_v2");
 };
 
 USTRUCT(BlueprintType)
@@ -44,6 +53,30 @@ struct CADIMPORTER_API FCadMasterChildPlacement
 	bool bMovable = false;
 };
 
+USTRUCT(BlueprintType)
+struct CADIMPORTER_API FCadMasterPlacementNodeRecord
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CAD Master|Hierarchy")
+	FString NodeName;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CAD Master|Hierarchy")
+	ECadMasterPlacementNodeType NodeType = ECadMasterPlacementNodeType::Static;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CAD Master|Hierarchy")
+	FString ChildJsonFileName;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CAD Master|Hierarchy")
+	FString MasterJsonFileName;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CAD Master|Hierarchy")
+	FTransform RelativeTransform = FTransform::Identity;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CAD Master|Hierarchy")
+	int32 ParentNodeIndex = INDEX_NONE;
+};
+
 UCLASS(BlueprintType, Blueprintable)
 class CADIMPORTER_API ACadMasterActor : public AActor
 {
@@ -57,6 +90,9 @@ public:
 	FCadMasterActorMetadata Metadata;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CAD Master")
+	TArray<FCadMasterPlacementNodeRecord> HierarchyNodes;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CAD Master", meta = (DeprecatedProperty, DeprecationMessage = "Use HierarchyNodes instead."))
 	TArray<FCadMasterChildPlacement> ChildPlacements;
 
 	bool ConnectRobot(ACadRobotActor* RobotActor, const FString& ServerAddress, int32 ServerPort, int32& OutConnectionId);

@@ -1,8 +1,14 @@
 #include "MasterSelectionCollector.h"
 
+#include "CadMasterActor.h"
+#include "CadRobotActor.h"
 #include "CadImporterEditor.h"
+#include "Components/ActorComponent.h"
+#include "Components/SceneComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Editor/ActorHierarchyUtils.h"
 #include "Editor.h"
+#include "Engine/StaticMeshActor.h"
 #include "Engine/Selection.h"
 #include "Misc/Paths.h"
 
@@ -11,6 +17,130 @@ namespace
 	FString GetMasterWorkflowActorDisplayName(const AActor* Actor)
 	{
 		return Actor ? Actor->GetActorNameOrLabel() : TEXT("(none)");
+	}
+
+	bool HasStaticMeshContentForSelectionCollector(AActor* Actor)
+	{
+		if (!Actor)
+		{
+			return false;
+		}
+
+		TInlineComponentArray<UStaticMeshComponent*> MeshComponents(Actor);
+		for (const UStaticMeshComponent* MeshComponent : MeshComponents)
+		{
+			if (MeshComponent && MeshComponent->GetStaticMesh())
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	bool HasMeaningfulNonSceneComponentsForSelectionCollector(AActor* Actor)
+	{
+		if (!Actor)
+		{
+			return false;
+		}
+
+		TInlineComponentArray<UActorComponent*> ActorComponents(Actor);
+		for (const UActorComponent* ActorComponent : ActorComponents)
+		{
+			if (!ActorComponent || ActorComponent->IsA<USceneComponent>())
+			{
+				continue;
+			}
+
+			return true;
+		}
+
+		return false;
+	}
+
+	bool IsGroupingActor(AActor* Actor, const TArray<AActor*>& DirectChildren)
+	{
+		return Actor &&
+			DirectChildren.Num() > 0 &&
+			!HasStaticMeshContentForSelectionCollector(Actor) &&
+			!HasMeaningfulNonSceneComponentsForSelectionCollector(Actor) &&
+			!Actor->IsA<AStaticMeshActor>();
+	}
+
+	ECadMasterNodeType InferNodeType(AActor* Actor, const TArray<AActor*>& DirectChildren)
+	{
+		if (!Actor)
+		{
+			return ECadMasterNodeType::Static;
+		}
+
+		if (Actor->IsA<ACadRobotActor>())
+		{
+			return ECadMasterNodeType::Robot;
+		}
+
+		if (Actor->IsA<ACadMasterActor>() || IsGroupingActor(Actor, DirectChildren))
+		{
+			return ECadMasterNodeType::Master;
+		}
+
+		return ECadMasterNodeType::Static;
+	}
+
+	void CollectHierarchyNodeRecursive(
+		AActor* Actor,
+		const FTransform& ParentWorldTransform,
+		const FTransform& ParentAccumulatedTransform,
+		FCadMasterHierarchyNode& OutNode,
+		TArray<FCadChildEntry>& OutFlatChildren)
+	{
+		OutNode = FCadMasterHierarchyNode();
+		if (!Actor)
+		{
+			return;
+		}
+
+		TArray<AActor*> DirectChildren;
+		CadActorHierarchyUtils::GetSortedAttachedChildren(Actor, DirectChildren, false);
+
+		OutNode.ActorName = GetMasterWorkflowActorDisplayName(Actor);
+		OutNode.ActorPath = Actor->GetPathName();
+		OutNode.RelativeTransform = Actor->GetActorTransform().GetRelativeTransform(ParentWorldTransform);
+		OutNode.NodeType = InferNodeType(Actor, DirectChildren);
+
+		const FTransform AccumulatedRelativeTransform = OutNode.RelativeTransform * ParentAccumulatedTransform;
+		if (CadMasterNodeTypeUsesChildJson(OutNode.NodeType))
+		{
+			const FString SafeActorName = FPaths::MakeValidFileName(OutNode.ActorName);
+			OutNode.ChildJsonFileName = FString::Printf(TEXT("%s.json"), SafeActorName.IsEmpty() ? TEXT("Child") : *SafeActorName);
+
+			FCadChildEntry ChildEntry;
+			ChildEntry.ActorName = OutNode.ActorName;
+			ChildEntry.ActorPath = OutNode.ActorPath;
+			ChildEntry.RelativeTransform = AccumulatedRelativeTransform;
+			ChildEntry.ActorType = CadMasterChildActorTypeFromNodeType(OutNode.NodeType);
+			ChildEntry.ChildJsonFileName = OutNode.ChildJsonFileName;
+			OutFlatChildren.Add(MoveTemp(ChildEntry));
+			return;
+		}
+
+		for (AActor* ChildActor : DirectChildren)
+		{
+			if (!ChildActor)
+			{
+				continue;
+			}
+
+			FCadMasterHierarchyNode ChildNode;
+			CollectHierarchyNodeRecursive(
+				ChildActor,
+				Actor->GetActorTransform(),
+				AccumulatedRelativeTransform,
+				ChildNode,
+				OutFlatChildren);
+			OutNode.Children.Add(MoveTemp(ChildNode));
+		}
 	}
 
 	void AddViolation(
@@ -205,15 +335,17 @@ namespace CadMasterSelectionCollector
 				continue;
 			}
 
-			FCadChildEntry ChildEntry;
-			ChildEntry.ActorName = GetMasterWorkflowActorDisplayName(ChildActor);
-			ChildEntry.ActorPath = ChildActor->GetPathName();
-			ChildEntry.RelativeTransform = ChildActor->GetActorTransform().GetRelativeTransform(MasterActor->GetActorTransform());
-			ChildEntry.ChildJsonFileName = FString::Printf(TEXT("%s.json"), *FPaths::MakeValidFileName(ChildEntry.ActorName));
-			OutResult.Children.Add(MoveTemp(ChildEntry));
+			FCadMasterHierarchyNode ChildNode;
+			CollectHierarchyNodeRecursive(
+				ChildActor,
+				MasterActor->GetActorTransform(),
+				FTransform::Identity,
+				ChildNode,
+				OutResult.Children);
+			OutResult.HierarchyChildren.Add(MoveTemp(ChildNode));
 		}
 
-		if (OutResult.Children.Num() == 0)
+		if (Children.Num() == 0)
 		{
 			AddViolation(
 				OutResult,
