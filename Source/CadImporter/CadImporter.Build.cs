@@ -13,5 +13,13 @@ public class CadImporter : ModuleRules
 				"CoreUObject",
 				"Engine"
 			});
+
+		PrivateDependencyModuleNames.AddRange(
+			new string[]
+			{
+				"Json",
+				"JsonUtilities",
+				"TcpSocketPlugin"
+			});
 	}
 }

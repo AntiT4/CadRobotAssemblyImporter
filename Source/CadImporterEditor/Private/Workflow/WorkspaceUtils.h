@@ -1,0 +1,25 @@
+#pragma once
+
+#include "CoreMinimal.h"
+
+namespace CadWorkspaceUtils
+{
+	FString NormalizeOptionalDirectoryPath(const FString& PathInput);
+	FString NormalizeOptionalFilePath(const FString& PathInput);
+
+	bool TryNormalizePath(
+		const FString& WorkspaceInput,
+		FString& OutTrimmedWorkspace,
+		FString& OutNormalizedWorkspace,
+		FString& OutError);
+
+	bool TryValidateForApply(
+		const FString& WorkspaceInput,
+		FString& OutNormalizedWorkspace,
+		FString& OutError);
+
+	bool TryValidateForGeneration(
+		const FString& WorkspaceInput,
+		FString& OutNormalizedWorkspace,
+		FString& OutError);
+}

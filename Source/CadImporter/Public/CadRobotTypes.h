@@ -54,6 +54,9 @@ struct CADIMPORTER_API FCadRobotStatus
 	double TimestampSec = 0.0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "CAD Robot")
+	int32 ConnectionId = INDEX_NONE;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "CAD Robot")
 	TArray<FCadRobotJointStatus> Joints;
 };
 

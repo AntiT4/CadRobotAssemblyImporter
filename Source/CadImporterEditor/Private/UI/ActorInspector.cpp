@@ -1,6 +1,6 @@
 #include "UI/ActorInspector.h"
 
-#include "UI/DialogUtils.h"
+#include "UI/ImportDialogUtils.h"
 #include "Components/StaticMeshComponent.h"
 #include "Editor.h"
 #include "Engine/Selection.h"
