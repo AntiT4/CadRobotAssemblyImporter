@@ -106,6 +106,10 @@ private:
 	void DiscoverRobotJoints();
 	int32 FindResolvedJointIndex(FName JointName) const;
 	void RegisterResolvedJointAlias(FName JointName, int32 JointIndex);
+	void TryReconnectIfNeeded();
+	void ApplyQueuedCommandIfAny();
+	void ProcessPendingReceiveBytes();
+	bool TryExtractNextCommandFrame(FString& OutCommandJson);
 	bool PublishStatus();
 	bool TryConsumeCommandFrame(const FString& CommandJson);
 	float ReadJointPosition(const FCadRobotResolvedJoint& Joint) const;
