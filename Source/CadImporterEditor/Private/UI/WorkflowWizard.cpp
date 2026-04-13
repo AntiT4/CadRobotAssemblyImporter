@@ -2,7 +2,6 @@
 #include "UI/WorkflowWizardHierarchyUtils.h"
 #include "UI/WorkflowWizardSharedUtils.h"
 
-#include "CadMasterActor.h"
 #include "CadImportStringUtils.h"
 #include "CadImporterEditorUserSettings.h"
 #include "ChildDocParser.h"
@@ -45,56 +44,6 @@ using namespace CadWorkflowWizardHierarchyUtils;
 
 namespace
 {
-	bool IsHierarchyNodePathFlattenable(const FCadMasterHierarchyNode& Node)
-	{
-		AActor* NodeActor = CadActorHierarchyUtils::FindByPath(Node.ActorPath);
-		return CadActorHierarchyUtils::CanActorFlattenOneLevel(NodeActor);
-	}
-
-	void BuildEditableHierarchyNodeRecursive(
-		const FCadMasterHierarchyNode& SourceNode,
-		const TSet<FString>& ForcedMasterPaths,
-		const TSet<FString>& BranchPathsTreatedAsNone,
-		const TMap<FString, ECadMasterChildActorType>& ExistingLeafTypesByPath,
-		SCadWorkflowWizard::FEditableHierarchyNode& OutNode)
-	{
-		OutNode = SCadWorkflowWizard::FEditableHierarchyNode();
-		OutNode.ActorName = SourceNode.ActorName;
-		OutNode.ActorPath = SourceNode.ActorPath;
-		OutNode.RelativeTransform = SourceNode.RelativeTransform;
-		OutNode.bCanPromoteToMaster = IsHierarchyNodePathFlattenable(SourceNode);
-
-		AActor* SourceActor = CadActorHierarchyUtils::FindByPath(SourceNode.ActorPath);
-		const bool bForcedMaster = ForcedMasterPaths.Contains(SourceNode.ActorPath);
-		const bool bIsExplicitMasterActor = SourceActor && SourceActor->IsA<ACadMasterActor>();
-		OutNode.bIsBranchNode = bForcedMaster || bIsExplicitMasterActor;
-		OutNode.bTreatAsMaster = OutNode.bIsBranchNode && !BranchPathsTreatedAsNone.Contains(SourceNode.ActorPath);
-		OutNode.bIncluded = true;
-		OutNode.LeafType = ECadMasterChildActorType::Static;
-
-		if (const ECadMasterChildActorType* ExistingLeafType = ExistingLeafTypesByPath.Find(SourceNode.ActorPath))
-		{
-			OutNode.LeafType = *ExistingLeafType;
-		}
-
-		if (!OutNode.bIsBranchNode)
-		{
-			return;
-		}
-
-		for (const FCadMasterHierarchyNode& ChildNode : SourceNode.Children)
-		{
-			SCadWorkflowWizard::FEditableHierarchyNode EditableChildNode;
-			BuildEditableHierarchyNodeRecursive(
-				ChildNode,
-				ForcedMasterPaths,
-				BranchPathsTreatedAsNone,
-				ExistingLeafTypesByPath,
-				EditableChildNode);
-			OutNode.Children.Add(MoveTemp(EditableChildNode));
-		}
-	}
-
 	bool SetEditableBranchMasterModeRecursive(
 		TArray<SCadWorkflowWizard::FEditableHierarchyNode>& Nodes,
 		const FString& ActorPath,

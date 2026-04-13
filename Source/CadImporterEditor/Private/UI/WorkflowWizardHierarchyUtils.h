@@ -7,6 +7,14 @@ namespace CadWorkflowWizardHierarchyUtils
 {
 	FString ToWorkflowNodeTypeLabel(ECadMasterChildActorType ActorType);
 	bool TryParseWorkflowNodeTypeLabel(const FString& SelectedType, ECadMasterChildActorType& OutType);
+	bool IsHierarchyNodePathFlattenable(const FCadMasterHierarchyNode& Node);
+
+	void BuildEditableHierarchyNodeRecursive(
+		const FCadMasterHierarchyNode& SourceNode,
+		const TSet<FString>& ForcedMasterPaths,
+		const TSet<FString>& BranchPathsTreatedAsNone,
+		const TMap<FString, ECadMasterChildActorType>& ExistingLeafTypesByPath,
+		SCadWorkflowWizard::FEditableHierarchyNode& OutNode);
 
 	void FlattenEditableHierarchyNodeRecursive(
 		const SCadWorkflowWizard::FEditableHierarchyNode& Node,
