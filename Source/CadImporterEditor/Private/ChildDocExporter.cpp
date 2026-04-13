@@ -11,6 +11,7 @@
 #include "Misc/Paths.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "Workflow/WorkflowBlueprintBuild.h"
 #include "Workflow/ChildVisualCollector.h"
 
 namespace
@@ -269,26 +270,6 @@ namespace
 		}
 	}
 
-	void CollectDirectLeafChildrenFromHierarchyNodes(const TArray<FCadMasterHierarchyNode>& HierarchyNodes, TArray<FCadChildEntry>& OutChildren)
-	{
-		OutChildren.Reset();
-		for (const FCadMasterHierarchyNode& Node : HierarchyNodes)
-		{
-			if (!CadMasterNodeTypeUsesChildJson(Node.NodeType))
-			{
-				continue;
-			}
-
-			FCadChildEntry ChildEntry;
-			ChildEntry.ActorName = Node.ActorName;
-			ChildEntry.ActorPath = Node.ActorPath;
-			ChildEntry.RelativeTransform = Node.RelativeTransform;
-			ChildEntry.ActorType = CadMasterChildActorTypeFromNodeType(Node.NodeType);
-			ChildEntry.ChildJsonFileName = Node.ChildJsonFileName;
-			OutChildren.Add(MoveTemp(ChildEntry));
-		}
-	}
-
 	bool HasReferencedNestedMasterChildren(const FCadMasterDoc& MasterDocument)
 	{
 		return MasterDocument.HierarchyChildren.ContainsByPredicate([](const FCadMasterHierarchyNode& Node)
@@ -317,7 +298,7 @@ namespace
 		TArray<FCadChildEntry> LeafChildren;
 		if (MasterDocument.HierarchyChildren.Num() > 0)
 		{
-			CollectDirectLeafChildrenFromHierarchyNodes(MasterDocument.HierarchyChildren, LeafChildren);
+			CadWorkflowBlueprintBuild::CollectDirectLeafChildrenForBuild(MasterDocument, LeafChildren);
 		}
 		if (LeafChildren.Num() == 0)
 		{
