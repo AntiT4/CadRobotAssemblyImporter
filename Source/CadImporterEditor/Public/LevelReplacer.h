@@ -21,6 +21,9 @@ struct FCadLevelReplacePlan
 	FString MasterParentActorPath;
 	FString ChildJsonRootPath;
 	int32 HierarchyRootCount = 0;
+	int32 CandidateDeleteActorCount = 0;
+	int32 PreservedDirectChildCount = 0;
+	bool bHasDestructiveChanges = false;
 	TArray<FString> CandidateDeleteActorPaths;
 	TArray<FString> PreservedDirectChildPaths;
 };

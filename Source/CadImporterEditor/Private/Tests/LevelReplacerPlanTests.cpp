@@ -31,6 +31,9 @@ bool FCadLevelReplacerBuildPlanFailsWithoutValidMaster::RunTest(const FString& P
 	TestFalse(TEXT("Build plan fails for invalid master actor path"), bBuilt);
 	TestTrue(TEXT("Error is populated on failure"), !Error.TrimStartAndEnd().IsEmpty());
 	TestTrue(TEXT("Plan remains empty on failure"), Plan.CandidateDeleteActorPaths.Num() == 0);
+	TestEqual(TEXT("Delete actor count defaults to zero on failure"), Plan.CandidateDeleteActorCount, 0);
+	TestEqual(TEXT("Preserved child count defaults to zero on failure"), Plan.PreservedDirectChildCount, 0);
+	TestFalse(TEXT("No destructive change flag on failure"), Plan.bHasDestructiveChanges);
 
 	return true;
 }

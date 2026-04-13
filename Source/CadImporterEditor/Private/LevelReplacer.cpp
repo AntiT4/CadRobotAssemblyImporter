@@ -823,6 +823,37 @@ namespace
 				OutPlan.DebugPlan.PreservedDirectChildPaths.Add(PreservedChild->GetPathName());
 			}
 		}
+		OutPlan.DebugPlan.CandidateDeleteActorCount = OutPlan.DebugPlan.CandidateDeleteActorPaths.Num();
+		OutPlan.DebugPlan.PreservedDirectChildCount = OutPlan.DebugPlan.PreservedDirectChildPaths.Num();
+		OutPlan.DebugPlan.bHasDestructiveChanges = OutPlan.DebugPlan.CandidateDeleteActorCount > 0;
+
+		return true;
+	}
+
+	bool ValidateExecutionPlanForApply(const FLevelReplaceExecutionPlan& ExecutionPlan, FString& OutError)
+	{
+		OutError.Reset();
+		if (!ExecutionPlan.MasterActor)
+		{
+			OutError = TEXT("Replacement plan is invalid: master actor is null.");
+			return false;
+		}
+
+		for (AActor* PreservedChild : ExecutionPlan.PreservedDirectChildren)
+		{
+			if (!PreservedChild)
+			{
+				continue;
+			}
+
+			if (ExecutionPlan.ActorsToDelete.Contains(PreservedChild))
+			{
+				OutError = FString::Printf(
+					TEXT("Replacement plan is invalid: preserved child is still marked for deletion: %s"),
+					*PreservedChild->GetPathName());
+				return false;
+			}
+		}
 
 		return true;
 	}
@@ -885,6 +916,10 @@ namespace CadLevelReplacer
 			ChildBlueprintsByJsonPath,
 			ExecutionPlan,
 			OutError))
+		{
+			return false;
+		}
+		if (!ValidateExecutionPlanForApply(ExecutionPlan, OutError))
 		{
 			return false;
 		}
