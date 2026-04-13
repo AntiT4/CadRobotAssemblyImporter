@@ -122,6 +122,32 @@ namespace
 		CadWorkflowBlueprintBuild::CollectDirectLeafChildrenForBuild(NestedDocument, NestedDocument.Children);
 		return NestedDocument;
 	}
+
+	bool TryResolveNestedMasterDocument(
+		const FCadMasterDoc& ParentDocument,
+		const FCadMasterHierarchyNode& MasterNode,
+		const FString& ParentChildJsonFolderPath,
+		FCadMasterDoc& OutNestedMasterDocument,
+		FString& OutNestedMasterJsonPath,
+		FString& OutError)
+	{
+		if (!MasterNode.MasterJsonFileName.TrimStartAndEnd().IsEmpty())
+		{
+			OutNestedMasterJsonPath = FPaths::ConvertRelativePathToFull(FPaths::Combine(ParentChildJsonFolderPath, MasterNode.MasterJsonFileName));
+			return CadChildDocExporter::TryParseMasterDocument(OutNestedMasterJsonPath, OutNestedMasterDocument, OutError);
+		}
+
+		if (MasterNode.Children.Num() > 0)
+		{
+			OutNestedMasterJsonPath = FPaths::Combine(
+				ParentChildJsonFolderPath,
+				FString::Printf(TEXT("%s.json"), *FPaths::MakeValidFileName(MasterNode.ActorName)));
+			OutNestedMasterDocument = BuildInlineNestedMasterDocument(ParentDocument, MasterNode, ParentChildJsonFolderPath);
+			return true;
+		}
+
+		return false;
+	}
 }
 
 namespace CadWorkflowBlueprintBuild
@@ -186,22 +212,19 @@ namespace CadWorkflowBlueprintBuild
 
 			FCadMasterDoc NestedMasterDocument;
 			FString NestedMasterJsonPath;
-			if (!Node.MasterJsonFileName.TrimStartAndEnd().IsEmpty())
+			if (!TryResolveNestedMasterDocument(
+				MasterDocument,
+				Node,
+				ChildJsonFolderPath,
+				NestedMasterDocument,
+				NestedMasterJsonPath,
+				OutError))
 			{
-				NestedMasterJsonPath = FPaths::ConvertRelativePathToFull(FPaths::Combine(ChildJsonFolderPath, Node.MasterJsonFileName));
-				if (!CadChildDocExporter::TryParseMasterDocument(NestedMasterJsonPath, NestedMasterDocument, OutError))
+				if (Node.MasterJsonFileName.TrimStartAndEnd().IsEmpty() && Node.Children.Num() == 0)
 				{
-					return false;
+					continue;
 				}
-			}
-			else if (Node.Children.Num() > 0)
-			{
-				NestedMasterJsonPath = FPaths::Combine(ChildJsonFolderPath, FString::Printf(TEXT("%s.json"), *FPaths::MakeValidFileName(Node.ActorName)));
-				NestedMasterDocument = BuildInlineNestedMasterDocument(MasterDocument, Node, ChildJsonFolderPath);
-			}
-			else
-			{
-				continue;
+				return false;
 			}
 
 			if (!TryBuildMasterBlueprintsRecursive(
@@ -301,22 +324,19 @@ namespace CadWorkflowBlueprintBuild
 
 			FCadMasterDoc NestedMasterDocument;
 			FString NestedMasterJsonPath;
-			if (!Node.MasterJsonFileName.TrimStartAndEnd().IsEmpty())
+			if (!TryResolveNestedMasterDocument(
+				MasterDocument,
+				Node,
+				ChildJsonFolderPath,
+				NestedMasterDocument,
+				NestedMasterJsonPath,
+				OutError))
 			{
-				NestedMasterJsonPath = FPaths::ConvertRelativePathToFull(FPaths::Combine(ChildJsonFolderPath, Node.MasterJsonFileName));
-				if (!CadChildDocExporter::TryParseMasterDocument(NestedMasterJsonPath, NestedMasterDocument, OutError))
+				if (Node.MasterJsonFileName.TrimStartAndEnd().IsEmpty() && Node.Children.Num() == 0)
 				{
-					return false;
+					continue;
 				}
-			}
-			else if (Node.Children.Num() > 0)
-			{
-				NestedMasterJsonPath = FPaths::Combine(ChildJsonFolderPath, FString::Printf(TEXT("%s.json"), *FPaths::MakeValidFileName(Node.ActorName)));
-				NestedMasterDocument = BuildInlineNestedMasterDocument(MasterDocument, Node, ChildJsonFolderPath);
-			}
-			else
-			{
-				continue;
+				return false;
 			}
 
 			if (!TryBuildChildBlueprintsRecursive(

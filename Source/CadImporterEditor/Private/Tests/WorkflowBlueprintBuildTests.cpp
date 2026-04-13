@@ -17,6 +17,7 @@ bool FCadWorkflowCollectDirectLeafChildrenUsesHierarchyWhenPresent::RunTest(cons
 	StaticNode.ActorPath = TEXT("/Root/Base");
 	StaticNode.NodeType = ECadMasterNodeType::Static;
 	StaticNode.ChildJsonFileName = TEXT("base.json");
+	StaticNode.RelativeTransform.SetLocation(FVector(10.0, 20.0, 30.0));
 
 	FCadMasterHierarchyNode BackgroundNode;
 	BackgroundNode.ActorName = TEXT("Backdrop");
@@ -36,7 +37,9 @@ bool FCadWorkflowCollectDirectLeafChildrenUsesHierarchyWhenPresent::RunTest(cons
 
 	TestEqual(TEXT("Only non-master hierarchy nodes are collected"), OutChildren.Num(), 2);
 	TestEqual(TEXT("First child actor name is copied"), OutChildren[0].ActorName, StaticNode.ActorName);
+	TestEqual(TEXT("First child actor path is copied"), OutChildren[0].ActorPath, StaticNode.ActorPath);
 	TestEqual(TEXT("First child type maps to Static"), OutChildren[0].ActorType, ECadMasterChildActorType::Static);
+	TestEqual(TEXT("First child relative transform is copied"), OutChildren[0].RelativeTransform.GetLocation(), StaticNode.RelativeTransform.GetLocation());
 	TestEqual(TEXT("Second child type maps to Background"), OutChildren[1].ActorType, ECadMasterChildActorType::Background);
 	TestEqual(TEXT("Second child json file is copied"), OutChildren[1].ChildJsonFileName, BackgroundNode.ChildJsonFileName);
 
