@@ -8,6 +8,7 @@
 #include "JsonObjectConverter.h"
 #include "PhysicsEngine/ConstraintInstance.h"
 #include "PhysicsEngine/PhysicsConstraintComponent.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogCadRobotIO, Log, All);
 
@@ -128,6 +129,7 @@ void ACadRobotActor::BeginPlay()
 
 void ACadRobotActor::Tick(float DeltaSeconds)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(CadRobotActor_Tick);
 	Super::Tick(DeltaSeconds);
 
 	if (ResolvedJoints.IsEmpty())
@@ -135,21 +137,8 @@ void ACadRobotActor::Tick(float DeltaSeconds)
 		DiscoverRobotJoints();
 	}
 
-	if (bEnableSocketIO && bAutoConnect && !bSocketConnected && !bSocketConnectInFlight)
-	{
-		const UWorld* World = GetWorld();
-		const double NowSec = World ? static_cast<double>(World->GetTimeSeconds()) : 0.0;
-		if (LastConnectionAttemptTimeSec < 0.0 || (NowSec - LastConnectionAttemptTimeSec) >= ReconnectIntervalSec)
-		{
-			ConnectIO();
-		}
-	}
-
-	if (bHasQueuedCommand)
-	{
-		Command = QueuedCommand;
-		bHasQueuedCommand = false;
-	}
+	TryReconnectIfNeeded();
+	ApplyQueuedCommandIfAny();
 
 	RunController(DeltaSeconds);
 	UpdateStatus(DeltaSeconds);
@@ -343,38 +332,80 @@ void ACadRobotActor::NotifySocketMessageReceived(int32 ConnectionId, TArray<uint
 	}
 
 	PendingReceiveBytes.Append(Message);
+	ProcessPendingReceiveBytes();
+}
 
-	for (;;)
+void ACadRobotActor::TryReconnectIfNeeded()
+{
+	if (!bEnableSocketIO || !bAutoConnect || bSocketConnected || bSocketConnectInFlight)
 	{
-		const int32 DelimiterIndex = FindFrameDelimiter(PendingReceiveBytes);
-		if (DelimiterIndex == INDEX_NONE)
-		{
-			break;
-		}
+		return;
+	}
 
-		TArray<uint8> FrameBytes;
-		if (DelimiterIndex > 0)
-		{
-			FrameBytes.Append(PendingReceiveBytes.GetData(), DelimiterIndex);
-		}
+	const UWorld* World = GetWorld();
+	const double NowSec = World ? static_cast<double>(World->GetTimeSeconds()) : 0.0;
+	if (LastConnectionAttemptTimeSec < 0.0 || (NowSec - LastConnectionAttemptTimeSec) >= ReconnectIntervalSec)
+	{
+		ConnectIO();
+	}
+}
 
-		PendingReceiveBytes.RemoveAt(0, DelimiterIndex + 1, EAllowShrinking::No);
+void ACadRobotActor::ApplyQueuedCommandIfAny()
+{
+	if (!bHasQueuedCommand)
+	{
+		return;
+	}
 
-		if (!FrameBytes.IsEmpty() && FrameBytes.Last() == static_cast<uint8>('\r'))
-		{
-			FrameBytes.Pop(EAllowShrinking::No);
-		}
+	Command = QueuedCommand;
+	bHasQueuedCommand = false;
+}
 
-		if (FrameBytes.IsEmpty())
+void ACadRobotActor::ProcessPendingReceiveBytes()
+{
+	TRACE_CPUPROFILER_EVENT_SCOPE(CadRobotActor_ProcessPendingReceiveBytes);
+
+	FString CommandJson;
+	while (TryExtractNextCommandFrame(CommandJson))
+	{
+		if (CommandJson.IsEmpty())
 		{
 			continue;
 		}
-
-		const FUTF8ToTCHAR Utf8Text(reinterpret_cast<const ANSICHAR*>(FrameBytes.GetData()), FrameBytes.Num());
-		FString CommandJson;
-		CommandJson.AppendChars(Utf8Text.Get(), Utf8Text.Length());
 		TryConsumeCommandFrame(CommandJson);
 	}
+}
+
+bool ACadRobotActor::TryExtractNextCommandFrame(FString& OutCommandJson)
+{
+	OutCommandJson.Reset();
+
+	const int32 DelimiterIndex = FindFrameDelimiter(PendingReceiveBytes);
+	if (DelimiterIndex == INDEX_NONE)
+	{
+		return false;
+	}
+
+	TArray<uint8> FrameBytes;
+	if (DelimiterIndex > 0)
+	{
+		FrameBytes.Append(PendingReceiveBytes.GetData(), DelimiterIndex);
+	}
+
+	PendingReceiveBytes.RemoveAt(0, DelimiterIndex + 1, EAllowShrinking::No);
+	if (!FrameBytes.IsEmpty() && FrameBytes.Last() == static_cast<uint8>('\r'))
+	{
+		FrameBytes.Pop(EAllowShrinking::No);
+	}
+
+	if (FrameBytes.IsEmpty())
+	{
+		return true;
+	}
+
+	const FUTF8ToTCHAR Utf8Text(reinterpret_cast<const ANSICHAR*>(FrameBytes.GetData()), FrameBytes.Num());
+	OutCommandJson.AppendChars(Utf8Text.Get(), Utf8Text.Length());
+	return true;
 }
 
 bool ACadRobotActor::EnsureMasterActor()
