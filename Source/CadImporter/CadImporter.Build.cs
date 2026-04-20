@@ -19,6 +19,8 @@ public class CadImporter : ModuleRules
 			{
 				"Json",
 				"JsonUtilities",
+				"Networking",
+				"Sockets",
 				"TcpSocketPlugin"
 			});
 	}

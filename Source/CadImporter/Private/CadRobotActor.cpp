@@ -233,7 +233,7 @@ bool ACadRobotActor::ConnectIO()
 	}
 
 	int32 ConnectionId = INDEX_NONE;
-	if (!MasterActor->ConnectRobot(this, ServerAddress, ServerPort, ConnectionId))
+	if (!MasterActor->ConnectRobot(this, ServerAddress, ServerPort, ReconnectIntervalSec, bAutoConnect, ConnectionId))
 	{
 		return false;
 	}
@@ -313,9 +313,13 @@ void ACadRobotActor::NotifySocketDisconnected(int32 ConnectionId)
 
 	UE_LOG(LogCadRobotIO, Warning, TEXT("Robot IO disconnected (connection_id=%d)."), ConnectionId);
 
-	bSocketConnectInFlight = false;
+	const bool bConnectionStillManaged = MasterActor && IsValid(MasterActor) && MasterActor->HasRobotConnection(ConnectionId);
+	bSocketConnectInFlight = bAutoConnect && bConnectionStillManaged;
 	bSocketConnected = false;
-	ActiveConnectionId = INDEX_NONE;
+	if (!bSocketConnectInFlight)
+	{
+		ActiveConnectionId = INDEX_NONE;
+	}
 	PendingReceiveBytes.Reset();
 }
 

@@ -5,5 +5,12 @@
     "version": "Project-defined (UE 5.x)",
     "license": ["Epic Unreal Engine EULA"],
     "notes": "Unreal Engine is required to build and use this plugin and is not distributed by this repository."
+  },
+  {
+    "name": "TCP Socket Plugin",
+    "url": "https://github.com/CodeSpartan/UE4TcpSocketPlugin",
+    "version": "1.0",
+    "license": ["MIT"],
+    "notes": "Marketplace/Fab plugin reference is retained for compatibility. Selected socket worker code is adapted into CadImporter from the public CodeSpartan/UE4TcpSocketPlugin repository; see ThirdParty/UE4TcpSocketPlugin_LICENSE.txt."
   }
 ]
