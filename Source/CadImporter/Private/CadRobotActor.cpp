@@ -138,12 +138,17 @@ void ACadRobotActor::Tick(float DeltaSeconds)
 	}
 
 	TryReconnectIfNeeded();
+	if (!bEnableSocketIO || !IsIOConnected())
+	{
+		return;
+	}
+
 	ApplyQueuedCommandIfAny();
 
 	RunController(DeltaSeconds);
 	UpdateStatus(DeltaSeconds);
 
-	if (bEnableSocketIO && bPublishStatusEveryTick)
+	if (bPublishStatusEveryTick)
 	{
 		PublishStatus();
 	}

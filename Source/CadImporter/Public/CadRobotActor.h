@@ -54,10 +54,10 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CAD Robot")
+	UPROPERTY(BlueprintReadWrite, Transient, Category = "CAD Robot")
 	FCadRobotCommand Command;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "CAD Robot")
+	UPROPERTY(BlueprintReadWrite, Transient, Category = "CAD Robot")
 	FCadRobotStatus Status;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CAD Robot|Import")
