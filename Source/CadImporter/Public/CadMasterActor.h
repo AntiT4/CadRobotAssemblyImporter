@@ -5,7 +5,7 @@
 #include "CadMasterActor.generated.h"
 
 class ACadRobotActor;
-class ATcpSocketConnection;
+class FCadRobotSocketClient;
 class USceneComponent;
 
 UENUM(BlueprintType)
@@ -95,29 +95,25 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "CAD Master", meta = (DeprecatedProperty, DeprecationMessage = "Use HierarchyNodes instead."))
 	TArray<FCadMasterChildPlacement> ChildPlacements;
 
-	bool ConnectRobot(ACadRobotActor* RobotActor, const FString& ServerAddress, int32 ServerPort, int32& OutConnectionId);
+	bool ConnectRobot(ACadRobotActor* RobotActor, const FString& ServerAddress, int32 ServerPort, float ReconnectIntervalSec, bool bReconnectEnabled, int32& OutConnectionId);
 	void DisconnectRobot(int32 ConnectionId);
 	bool IsRobotConnected(int32 ConnectionId) const;
 	bool SendRobotData(int32 ConnectionId, TArray<uint8> Data);
+	bool HasRobotConnection(int32 ConnectionId) const;
 
 private:
-	UFUNCTION()
 	void HandleSocketConnected(int32 ConnectionId);
 
-	UFUNCTION()
-	void HandleSocketDisconnected(int32 ConnectionId);
+	void HandleSocketDisconnected(int32 ConnectionId, bool bWillReconnect);
 
-	UFUNCTION()
-	void HandleSocketMessageReceived(int32 ConnectionId, UPARAM(ref) TArray<uint8>& Message);
-
-	bool EnsureSocketConnectionActor();
+	void HandleSocketMessageReceived(int32 ConnectionId, TArray<uint8> Message);
 
 	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly, Category = "CAD Master", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<USceneComponent> SceneRoot;
 
 	UPROPERTY(Transient)
-	TObjectPtr<ATcpSocketConnection> SocketConnectionActor = nullptr;
-
-	UPROPERTY(Transient)
 	TMap<int32, TObjectPtr<ACadRobotActor>> RobotByConnectionId;
+
+	TMap<int32, TSharedPtr<FCadRobotSocketClient>> SocketClientByConnectionId;
+	int32 NextConnectionId = 0;
 };

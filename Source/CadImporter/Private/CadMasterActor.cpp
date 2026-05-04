@@ -1,9 +1,9 @@
 #include "CadMasterActor.h"
 
+#include "IO/CadRobotSocketClient.h"
 #include "CadRobotActor.h"
 #include "Components/SceneComponent.h"
 #include "Engine/World.h"
-#include "TcpSocketConnection.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogCadMasterIO, Log, All);
 
@@ -26,16 +26,10 @@ void ACadMasterActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		DisconnectRobot(ConnectionId);
 	}
 
-	if (SocketConnectionActor && IsValid(SocketConnectionActor))
-	{
-		SocketConnectionActor->Destroy();
-		SocketConnectionActor = nullptr;
-	}
-
 	Super::EndPlay(EndPlayReason);
 }
 
-bool ACadMasterActor::ConnectRobot(ACadRobotActor* RobotActor, const FString& ServerAddress, int32 ServerPort, int32& OutConnectionId)
+bool ACadMasterActor::ConnectRobot(ACadRobotActor* RobotActor, const FString& ServerAddress, int32 ServerPort, float ReconnectIntervalSec, bool bReconnectEnabled, int32& OutConnectionId)
 {
 	OutConnectionId = INDEX_NONE;
 
@@ -44,61 +38,85 @@ bool ACadMasterActor::ConnectRobot(ACadRobotActor* RobotActor, const FString& Se
 		return false;
 	}
 
-	if (!EnsureSocketConnectionActor())
-	{
-		return false;
-	}
+	const int32 ConnectionId = NextConnectionId++;
+	TWeakObjectPtr<ACadMasterActor> WeakThis(this);
 
-	FTcpSocketDisconnectDelegate OnDisconnected;
-	OnDisconnected.BindDynamic(this, &ACadMasterActor::HandleSocketDisconnected);
-
-	FTcpSocketConnectDelegate OnConnected;
-	OnConnected.BindDynamic(this, &ACadMasterActor::HandleSocketConnected);
-
-	FTcpSocketReceivedMessageDelegate OnMessageReceived;
-	OnMessageReceived.BindDynamic(this, &ACadMasterActor::HandleSocketMessageReceived);
-
-	int32 ConnectionId = INDEX_NONE;
-	SocketConnectionActor->Connect(ServerAddress, ServerPort, OnDisconnected, OnConnected, OnMessageReceived, ConnectionId);
-	if (ConnectionId == INDEX_NONE)
-	{
-		UE_LOG(LogCadMasterIO, Warning, TEXT("Master failed to allocate a connection id for %s."), *RobotActor->GetName());
-		return false;
-	}
+	TSharedPtr<FCadRobotSocketClient> SocketClient = MakeShared<FCadRobotSocketClient>(
+		ConnectionId,
+		ServerAddress,
+		ServerPort,
+		ReconnectIntervalSec,
+		bReconnectEnabled,
+		[WeakThis](int32 ConnectedConnectionId)
+		{
+			if (ACadMasterActor* MasterActor = WeakThis.Get())
+			{
+				MasterActor->HandleSocketConnected(ConnectedConnectionId);
+			}
+		},
+		[WeakThis](int32 DisconnectedConnectionId, bool bWillReconnect)
+		{
+			if (ACadMasterActor* MasterActor = WeakThis.Get())
+			{
+				MasterActor->HandleSocketDisconnected(DisconnectedConnectionId, bWillReconnect);
+			}
+		},
+		[WeakThis](int32 MessageConnectionId, TArray<uint8> Message)
+		{
+			if (ACadMasterActor* MasterActor = WeakThis.Get())
+			{
+				MasterActor->HandleSocketMessageReceived(MessageConnectionId, MoveTemp(Message));
+			}
+		});
 
 	RobotByConnectionId.Add(ConnectionId, RobotActor);
+	SocketClientByConnectionId.Add(ConnectionId, SocketClient);
 	OutConnectionId = ConnectionId;
+	SocketClient->Start();
 	return true;
 }
 
 void ACadMasterActor::DisconnectRobot(int32 ConnectionId)
 {
-	if (SocketConnectionActor && IsValid(SocketConnectionActor) && ConnectionId != INDEX_NONE)
+	if (TSharedPtr<FCadRobotSocketClient>* SocketClient = SocketClientByConnectionId.Find(ConnectionId))
 	{
-		SocketConnectionActor->Disconnect(ConnectionId);
+		if (SocketClient->IsValid())
+		{
+			(*SocketClient)->Stop();
+		}
 	}
 
+	SocketClientByConnectionId.Remove(ConnectionId);
 	RobotByConnectionId.Remove(ConnectionId);
 }
 
 bool ACadMasterActor::IsRobotConnected(int32 ConnectionId) const
 {
-	if (!SocketConnectionActor || !IsValid(SocketConnectionActor) || ConnectionId == INDEX_NONE)
+	if (const TSharedPtr<FCadRobotSocketClient>* SocketClient = SocketClientByConnectionId.Find(ConnectionId))
 	{
-		return false;
+		return SocketClient->IsValid() && (*SocketClient)->IsConnected();
 	}
 
-	return SocketConnectionActor->isConnected(ConnectionId);
+	return false;
 }
 
 bool ACadMasterActor::SendRobotData(int32 ConnectionId, TArray<uint8> Data)
 {
-	if (!SocketConnectionActor || !IsValid(SocketConnectionActor) || ConnectionId == INDEX_NONE)
+	if (TSharedPtr<FCadRobotSocketClient>* SocketClient = SocketClientByConnectionId.Find(ConnectionId))
 	{
-		return false;
+		if (SocketClient->IsValid() && (*SocketClient)->IsConnected())
+		{
+			(*SocketClient)->SendData(MoveTemp(Data));
+			return true;
+		}
 	}
 
-	return SocketConnectionActor->SendData(ConnectionId, MoveTemp(Data));
+	return false;
+}
+
+bool ACadMasterActor::HasRobotConnection(int32 ConnectionId) const
+{
+	return SocketClientByConnectionId.Contains(ConnectionId);
 }
 
 void ACadMasterActor::HandleSocketConnected(int32 ConnectionId)
@@ -115,7 +133,7 @@ void ACadMasterActor::HandleSocketConnected(int32 ConnectionId)
 	UE_LOG(LogCadMasterIO, Verbose, TEXT("Dropping connected event for unknown connection_id=%d."), ConnectionId);
 }
 
-void ACadMasterActor::HandleSocketDisconnected(int32 ConnectionId)
+void ACadMasterActor::HandleSocketDisconnected(int32 ConnectionId, bool bWillReconnect)
 {
 	TObjectPtr<ACadRobotActor> RobotActor = nullptr;
 	if (TObjectPtr<ACadRobotActor>* FoundRobotActor = RobotByConnectionId.Find(ConnectionId))
@@ -123,7 +141,11 @@ void ACadMasterActor::HandleSocketDisconnected(int32 ConnectionId)
 		RobotActor = *FoundRobotActor;
 	}
 
-	RobotByConnectionId.Remove(ConnectionId);
+	if (!bWillReconnect)
+	{
+		SocketClientByConnectionId.Remove(ConnectionId);
+		RobotByConnectionId.Remove(ConnectionId);
+	}
 
 	if (IsValid(RobotActor))
 	{
@@ -134,7 +156,7 @@ void ACadMasterActor::HandleSocketDisconnected(int32 ConnectionId)
 	UE_LOG(LogCadMasterIO, Verbose, TEXT("Dropping disconnected event for unknown connection_id=%d."), ConnectionId);
 }
 
-void ACadMasterActor::HandleSocketMessageReceived(int32 ConnectionId, TArray<uint8>& Message)
+void ACadMasterActor::HandleSocketMessageReceived(int32 ConnectionId, TArray<uint8> Message)
 {
 	if (TObjectPtr<ACadRobotActor>* RobotActor = RobotByConnectionId.Find(ConnectionId))
 	{
@@ -146,38 +168,4 @@ void ACadMasterActor::HandleSocketMessageReceived(int32 ConnectionId, TArray<uin
 	}
 
 	UE_LOG(LogCadMasterIO, Verbose, TEXT("Dropping message for unknown connection_id=%d."), ConnectionId);
-}
-
-bool ACadMasterActor::EnsureSocketConnectionActor()
-{
-	if (SocketConnectionActor && IsValid(SocketConnectionActor))
-	{
-		return true;
-	}
-
-	UWorld* World = GetWorld();
-	if (!World)
-	{
-		return false;
-	}
-
-	FActorSpawnParameters SpawnParameters;
-	SpawnParameters.Owner = this;
-	SpawnParameters.ObjectFlags |= RF_Transient;
-	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-
-	SocketConnectionActor = World->SpawnActor<ATcpSocketConnection>(
-		ATcpSocketConnection::StaticClass(),
-		FVector::ZeroVector,
-		FRotator::ZeroRotator,
-		SpawnParameters);
-	if (!SocketConnectionActor)
-	{
-		UE_LOG(LogCadMasterIO, Error, TEXT("Failed to spawn TcpSocketConnection helper actor."));
-		return false;
-	}
-
-	SocketConnectionActor->SetActorHiddenInGame(true);
-	SocketConnectionActor->SetActorEnableCollision(false);
-	return true;
 }

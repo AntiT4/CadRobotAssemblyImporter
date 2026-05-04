@@ -17,6 +17,17 @@ namespace
 		TSet<FString> ActorPaths;
 	};
 
+	struct FLevelReplaceExecutionPlan
+	{
+		AActor* MasterActor = nullptr;
+		AActor* MasterParentActor = nullptr;
+		FString RootChildJsonFolderPath;
+		TArray<FCadMasterHierarchyNode> HierarchyRoots;
+		TArray<AActor*> ActorsToDelete;
+		TArray<AActor*> PreservedDirectChildren;
+		FCadLevelReplacePlan DebugPlan;
+	};
+
 	FString NormalizeActorName(const FString& ActorName)
 	{
 		return ActorName.TrimStartAndEnd();
@@ -730,10 +741,144 @@ namespace
 		++InOutSpawnedActorCount;
 		return true;
 	}
+
+	bool TryBuildExecutionPlan(
+		const FCadMasterDoc& MasterDocument,
+		const TMap<FString, UBlueprint*>& MasterBlueprintsByJsonPath,
+		const TMap<FString, UBlueprint*>& ChildBlueprintsByJsonPath,
+		FLevelReplaceExecutionPlan& OutPlan,
+		FString& OutError)
+	{
+		OutPlan = FLevelReplaceExecutionPlan();
+		OutError.Reset();
+
+		if (!GEditor)
+		{
+			OutError = TEXT("Editor context is not available.");
+			return false;
+		}
+
+		UWorld* EditorWorld = GEditor->GetEditorWorldContext().World();
+		if (!EditorWorld)
+		{
+			OutError = TEXT("Editor world is not available.");
+			return false;
+		}
+
+		OutPlan.MasterActor = FindMasterActorInEditorWorld(MasterDocument.MasterActorPath);
+		if (!OutPlan.MasterActor)
+		{
+			OutError = FString::Printf(TEXT("Master actor not found in level: %s"), *MasterDocument.MasterActorPath);
+			return false;
+		}
+
+		OutPlan.MasterParentActor = OutPlan.MasterActor->GetAttachParentActor();
+		CollectActorHierarchyActors(OutPlan.MasterActor, OutPlan.ActorsToDelete);
+		if (OutPlan.ActorsToDelete.Num() == 0)
+		{
+			OutError = TEXT("No level actors were found for replacement.");
+			return false;
+		}
+
+		if (!CollectPreservedDirectChildren(OutPlan.MasterActor, MasterDocument, OutPlan.PreservedDirectChildren, OutError))
+		{
+			return false;
+		}
+		for (AActor* PreservedChild : OutPlan.PreservedDirectChildren)
+		{
+			RemoveActorSubtreeFromDeleteList(PreservedChild, OutPlan.ActorsToDelete);
+		}
+
+		OutPlan.HierarchyRoots = ResolveHierarchyRoots(MasterDocument);
+		OutPlan.RootChildJsonFolderPath = ResolveDocumentChildJsonFolderPath(MasterDocument);
+		for (const FCadMasterHierarchyNode& HierarchyRoot : OutPlan.HierarchyRoots)
+		{
+			if (!ValidateHierarchyNodeBlueprints(
+				MasterDocument,
+				OutPlan.RootChildJsonFolderPath,
+				HierarchyRoot,
+				MasterBlueprintsByJsonPath,
+				ChildBlueprintsByJsonPath,
+				OutError))
+			{
+				return false;
+			}
+		}
+
+		OutPlan.DebugPlan.MasterActorPath = OutPlan.MasterActor->GetPathName();
+		OutPlan.DebugPlan.MasterParentActorPath = OutPlan.MasterParentActor ? OutPlan.MasterParentActor->GetPathName() : FString();
+		OutPlan.DebugPlan.ChildJsonRootPath = OutPlan.RootChildJsonFolderPath;
+		OutPlan.DebugPlan.HierarchyRootCount = OutPlan.HierarchyRoots.Num();
+		for (AActor* ActorToDelete : OutPlan.ActorsToDelete)
+		{
+			if (ActorToDelete)
+			{
+				OutPlan.DebugPlan.CandidateDeleteActorPaths.Add(ActorToDelete->GetPathName());
+			}
+		}
+		for (AActor* PreservedChild : OutPlan.PreservedDirectChildren)
+		{
+			if (PreservedChild)
+			{
+				OutPlan.DebugPlan.PreservedDirectChildPaths.Add(PreservedChild->GetPathName());
+			}
+		}
+		OutPlan.DebugPlan.CandidateDeleteActorCount = OutPlan.DebugPlan.CandidateDeleteActorPaths.Num();
+		OutPlan.DebugPlan.PreservedDirectChildCount = OutPlan.DebugPlan.PreservedDirectChildPaths.Num();
+		OutPlan.DebugPlan.bHasDestructiveChanges = OutPlan.DebugPlan.CandidateDeleteActorCount > 0;
+
+		return true;
+	}
+
+	bool ValidateExecutionPlanForApply(const FLevelReplaceExecutionPlan& ExecutionPlan, FString& OutError)
+	{
+		OutError.Reset();
+		if (!ExecutionPlan.MasterActor)
+		{
+			OutError = TEXT("Replacement plan is invalid: master actor is null.");
+			return false;
+		}
+
+		for (AActor* PreservedChild : ExecutionPlan.PreservedDirectChildren)
+		{
+			if (!PreservedChild)
+			{
+				continue;
+			}
+
+			if (ExecutionPlan.ActorsToDelete.Contains(PreservedChild))
+			{
+				OutError = FString::Printf(
+					TEXT("Replacement plan is invalid: preserved child is still marked for deletion: %s"),
+					*PreservedChild->GetPathName());
+				return false;
+			}
+		}
+
+		return true;
+	}
 }
 
 namespace CadLevelReplacer
 {
+	bool TryBuildReplacementPlan(
+		const FCadMasterDoc& MasterDocument,
+		const TMap<FString, UBlueprint*>& MasterBlueprintsByJsonPath,
+		const TMap<FString, UBlueprint*>& ChildBlueprintsByJsonPath,
+		FCadLevelReplacePlan& OutPlan,
+		FString& OutError)
+	{
+		FLevelReplaceExecutionPlan ExecutionPlan;
+		const bool bSuccess = TryBuildExecutionPlan(
+			MasterDocument,
+			MasterBlueprintsByJsonPath,
+			ChildBlueprintsByJsonPath,
+			ExecutionPlan,
+			OutError);
+		OutPlan = bSuccess ? ExecutionPlan.DebugPlan : FCadLevelReplacePlan();
+		return bSuccess;
+	}
+
 	bool TryReplaceMasterHierarchyWithBlueprints(
 		const FCadMasterDoc& MasterDocument,
 		UBlueprint* MasterBlueprint,
@@ -764,42 +909,27 @@ namespace CadLevelReplacer
 			return false;
 		}
 
-		AActor* MasterActor = FindMasterActorInEditorWorld(MasterDocument.MasterActorPath);
-		if (!MasterActor)
-		{
-			OutError = FString::Printf(TEXT("Master actor not found in level: %s"), *MasterDocument.MasterActorPath);
-			return false;
-		}
-
-		TArray<AActor*> ActorsToDelete;
-		CollectActorHierarchyActors(MasterActor, ActorsToDelete);
-		if (ActorsToDelete.Num() == 0)
-		{
-			OutError = TEXT("No level actors were found for replacement.");
-			return false;
-		}
-
-		TArray<AActor*> PreservedDirectChildren;
-		if (!CollectPreservedDirectChildren(MasterActor, MasterDocument, PreservedDirectChildren, OutError))
+		FLevelReplaceExecutionPlan ExecutionPlan;
+		if (!TryBuildExecutionPlan(
+			MasterDocument,
+			MasterBlueprintsByJsonPath,
+			ChildBlueprintsByJsonPath,
+			ExecutionPlan,
+			OutError))
 		{
 			return false;
 		}
-		for (AActor* PreservedChild : PreservedDirectChildren)
+		if (!ValidateExecutionPlanForApply(ExecutionPlan, OutError))
 		{
-			RemoveActorSubtreeFromDeleteList(PreservedChild, ActorsToDelete);
+			return false;
 		}
 
-		const TArray<FCadMasterHierarchyNode> HierarchyRoots = ResolveHierarchyRoots(MasterDocument);
-		const FString RootChildJsonFolderPath = ResolveDocumentChildJsonFolderPath(MasterDocument);
-		for (const FCadMasterHierarchyNode& HierarchyRoot : HierarchyRoots)
-		{
-			if (!ValidateHierarchyNodeBlueprints(MasterDocument, RootChildJsonFolderPath, HierarchyRoot, MasterBlueprintsByJsonPath, ChildBlueprintsByJsonPath, OutError))
-			{
-				return false;
-			}
-		}
-
-		AActor* const MasterParentActor = MasterActor->GetAttachParentActor();
+		AActor* const MasterActor = ExecutionPlan.MasterActor;
+		AActor* const MasterParentActor = ExecutionPlan.MasterParentActor;
+		const TArray<FCadMasterHierarchyNode>& HierarchyRoots = ExecutionPlan.HierarchyRoots;
+		const FString& RootChildJsonFolderPath = ExecutionPlan.RootChildJsonFolderPath;
+		TArray<AActor*>& ActorsToDelete = ExecutionPlan.ActorsToDelete;
+		TArray<AActor*>& PreservedDirectChildren = ExecutionPlan.PreservedDirectChildren;
 		FScopedTransaction Transaction(
 			TEXT("CadImporterEditor"),
 			FText::FromString(TEXT("CAD Master Workflow Replace Level Actors")),
