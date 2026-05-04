@@ -3,9 +3,6 @@
 #include "CadMasterActor.h"
 #include "CadRobotActor.h"
 #include "CadImporterEditor.h"
-#include "Components/ActorComponent.h"
-#include "Components/SceneComponent.h"
-#include "Components/StaticMeshComponent.h"
 #include "Editor/ActorHierarchyUtils.h"
 #include "Editor.h"
 #include "Engine/StaticMeshActor.h"
@@ -14,57 +11,12 @@
 
 namespace
 {
-	FString GetMasterWorkflowActorDisplayName(const AActor* Actor)
-	{
-		return Actor ? Actor->GetActorNameOrLabel() : TEXT("(none)");
-	}
-
-	bool HasStaticMeshContentForSelectionCollector(AActor* Actor)
-	{
-		if (!Actor)
-		{
-			return false;
-		}
-
-		TInlineComponentArray<UStaticMeshComponent*> MeshComponents(Actor);
-		for (const UStaticMeshComponent* MeshComponent : MeshComponents)
-		{
-			if (MeshComponent && MeshComponent->GetStaticMesh())
-			{
-				return true;
-			}
-		}
-
-		return false;
-	}
-
-	bool HasMeaningfulNonSceneComponentsForSelectionCollector(AActor* Actor)
-	{
-		if (!Actor)
-		{
-			return false;
-		}
-
-		TInlineComponentArray<UActorComponent*> ActorComponents(Actor);
-		for (const UActorComponent* ActorComponent : ActorComponents)
-		{
-			if (!ActorComponent || ActorComponent->IsA<USceneComponent>())
-			{
-				continue;
-			}
-
-			return true;
-		}
-
-		return false;
-	}
-
 	bool IsGroupingActor(AActor* Actor, const TArray<AActor*>& DirectChildren)
 	{
 		return Actor &&
 			DirectChildren.Num() > 0 &&
-			!HasStaticMeshContentForSelectionCollector(Actor) &&
-			!HasMeaningfulNonSceneComponentsForSelectionCollector(Actor) &&
+			!CadActorHierarchyUtils::HasStaticMeshContent(Actor) &&
+			!CadActorHierarchyUtils::HasMeaningfulNonSceneComponents(Actor) &&
 			!Actor->IsA<AStaticMeshActor>();
 	}
 
@@ -104,7 +56,7 @@ namespace
 		TArray<AActor*> DirectChildren;
 		CadActorHierarchyUtils::GetSortedAttachedChildren(Actor, DirectChildren, false);
 
-		OutNode.ActorName = GetMasterWorkflowActorDisplayName(Actor);
+		OutNode.ActorName = CadActorHierarchyUtils::GetActorDisplayName(Actor);
 		OutNode.ActorPath = Actor->GetPathName();
 		OutNode.RelativeTransform = Actor->GetActorTransform().GetRelativeTransform(ParentWorldTransform);
 		OutNode.NodeType = InferNodeType(Actor, DirectChildren);
@@ -152,7 +104,7 @@ namespace
 		FCadHierarchyIssueInfo Violation;
 		Violation.Issue = Issue;
 		Violation.Message = Message;
-		Violation.ActorName = GetMasterWorkflowActorDisplayName(Actor);
+		Violation.ActorName = CadActorHierarchyUtils::GetActorDisplayName(Actor);
 		Violation.ActorPath = Actor ? Actor->GetPathName() : FString();
 		InOutResult.Issues.Add(MoveTemp(Violation));
 	}
@@ -239,7 +191,7 @@ namespace
 			TEXT("Master path: %s\n")
 			TEXT("Issue summary: missing_direct_children=%d, duplicate_child_actor_name=%d, invalid_selection=%d"),
 			TotalIssues,
-			*GetMasterWorkflowActorDisplayName(MasterActor),
+			*CadActorHierarchyUtils::GetActorDisplayName(MasterActor),
 			MasterActor ? *MasterActor->GetPathName() : TEXT("(none)"),
 			MissingChildrenCount,
 			DuplicateNameCount,

@@ -31,6 +31,12 @@ struct FCadHierarchyFlattenResult
 
 namespace CadActorHierarchyUtils
 {
+	FString GetActorDisplayName(const AActor* Actor);
+
+	bool HasStaticMeshContent(AActor* Actor);
+
+	bool HasMeaningfulNonSceneComponents(AActor* Actor);
+
 	void GetSortedAttachedChildren(
 		AActor* Actor,
 		TArray<AActor*>& OutChildren,

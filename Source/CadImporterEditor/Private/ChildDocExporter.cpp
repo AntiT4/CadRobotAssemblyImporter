@@ -16,11 +16,6 @@
 
 namespace
 {
-	FString GetActorDisplayNameForExtractor(const AActor* Actor)
-	{
-		return Actor ? Actor->GetActorNameOrLabel() : TEXT("(none)");
-	}
-
 	void BuildMovableChildTemplate(
 		const FCadChildEntry& ChildEntry,
 		AActor* ChildRootActor,
@@ -40,7 +35,7 @@ namespace
 				continue;
 			}
 
-			const FString LinkName = GetActorDisplayNameForExtractor(DirectChildActor);
+			const FString LinkName = CadActorHierarchyUtils::GetActorDisplayName(DirectChildActor);
 
 			FCadChildLinkDef LinkTemplate;
 			LinkTemplate.LinkName = LinkName;
