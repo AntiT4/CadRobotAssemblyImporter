@@ -51,38 +51,6 @@ namespace
 			: ActorPath;
 	}
 
-	bool DoesActorMatchChildEntry(const AActor* Actor, const FCadChildEntry& ChildEntry)
-	{
-		if (!Actor)
-		{
-			return false;
-		}
-
-		const FString EntryActorName = NormalizeActorName(ChildEntry.ActorName);
-		if (!EntryActorName.IsEmpty() && (Actor->GetActorNameOrLabel() == EntryActorName || Actor->GetName() == EntryActorName))
-		{
-			return true;
-		}
-
-		return !ChildEntry.ActorPath.IsEmpty() && Actor->GetPathName() == ChildEntry.ActorPath;
-	}
-
-	bool DoesActorMatchHierarchyNode(const AActor* Actor, const FCadMasterHierarchyNode& Node)
-	{
-		if (!Actor)
-		{
-			return false;
-		}
-
-		const FString EntryActorName = NormalizeActorName(Node.ActorName);
-		if (!EntryActorName.IsEmpty() && (Actor->GetActorNameOrLabel() == EntryActorName || Actor->GetName() == EntryActorName))
-		{
-			return true;
-		}
-
-		return !Node.ActorPath.IsEmpty() && Actor->GetPathName() == Node.ActorPath;
-	}
-
 	FCadMasterHierarchyNode BuildLevelReplacerHierarchyNodeFromChildEntry(const FCadChildEntry& ChildEntry)
 	{
 		FCadMasterHierarchyNode Node;
@@ -183,33 +151,36 @@ namespace
 			return;
 		}
 
-		OutActors.Add(RootActor);
-
 		TArray<AActor*> Descendants;
 		RootActor->GetAttachedActors(Descendants, true, true);
+
+		OutActors.Reserve(Descendants.Num() + 1);
+		OutActors.Add(RootActor);
 		for (AActor* Descendant : Descendants)
 		{
-			if (Descendant)
+			if (Descendant && Descendant != RootActor)
 			{
-				OutActors.AddUnique(Descendant);
+				OutActors.Add(Descendant);
 			}
 		}
 
-		OutActors.Sort([RootActor](const AActor& Left, const AActor& Right)
+		TMap<const AActor*, int32> DepthByActor;
+		DepthByActor.Reserve(OutActors.Num());
+		for (const AActor* Actor : OutActors)
 		{
-			auto ComputeDepth = [RootActor](const AActor& Actor) -> int32
+			int32 Depth = 0;
+			for (const AActor* Current = Actor; Current && Current != RootActor; Current = Current->GetAttachParentActor())
 			{
-				int32 Depth = 0;
-				const AActor* Current = &Actor;
-				while (Current && Current != RootActor)
-				{
-					Current = Current->GetAttachParentActor();
-					++Depth;
-				}
-				return Depth;
-			};
+				++Depth;
+			}
+			DepthByActor.Add(Actor, Depth);
+		}
 
-			return ComputeDepth(Left) > ComputeDepth(Right);
+		OutActors.Sort([&DepthByActor](const AActor& Left, const AActor& Right)
+		{
+			const int32* LeftDepth = DepthByActor.Find(&Left);
+			const int32* RightDepth = DepthByActor.Find(&Right);
+			return (LeftDepth ? *LeftDepth : 0) > (RightDepth ? *RightDepth : 0);
 		});
 	}
 
@@ -233,9 +204,10 @@ namespace
 
 		TArray<AActor*> PreservedActors;
 		CollectActorHierarchyActors(RootActor, PreservedActors);
-		InOutActorsToDelete.RemoveAll([&PreservedActors](AActor* Candidate)
+		const TSet<AActor*> PreservedSet(PreservedActors);
+		InOutActorsToDelete.RemoveAll([&PreservedSet](AActor* Candidate)
 		{
-			return Candidate && PreservedActors.Contains(Candidate);
+			return Candidate && PreservedSet.Contains(Candidate);
 		});
 	}
 
