@@ -3,6 +3,7 @@
 #include "UI/ImportDialogUtils.h"
 #include "Components/StaticMeshComponent.h"
 #include "Editor.h"
+#include "Editor/ActorHierarchyUtils.h"
 #include "Engine/Selection.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInterface.h"
@@ -14,11 +15,6 @@
 
 namespace
 {
-	FString GetActorDisplayName(const AActor* Actor)
-	{
-		return Actor ? Actor->GetActorNameOrLabel() : TEXT("(none)");
-	}
-
 	void GetSortedAttachedChildren(AActor* Actor, TArray<AActor*>& OutChildren)
 	{
 		OutChildren.Reset();
@@ -91,8 +87,8 @@ namespace
 		AActor* ParentActor = Actor->GetAttachParentActor();
 		const FTransform WorldTransform = Actor->GetActorTransform();
 
-		OutText += FString::Printf(TEXT("%s- %s [%s]\n"), *Indent, *GetActorDisplayName(Actor), *Actor->GetClass()->GetName());
-		OutText += FString::Printf(TEXT("%s  Parent: %s\n"), *Indent, *GetActorDisplayName(ParentActor));
+		OutText += FString::Printf(TEXT("%s- %s [%s]\n"), *Indent, *CadActorHierarchyUtils::GetActorDisplayName(Actor), *Actor->GetClass()->GetName());
+		OutText += FString::Printf(TEXT("%s  Parent: %s\n"), *Indent, *CadActorHierarchyUtils::GetActorDisplayName(ParentActor));
 
 		if (ParentActor)
 		{
@@ -154,7 +150,7 @@ namespace CadActorInspector
 		AActor* RootActor = ActorSelection[0];
 		OutPreview = FString::Printf(
 			TEXT("Selected Actor: %s\nClass: %s\nSelected Count: %d (showing first selected actor)\nDescendants: %d\n\n"),
-			*GetActorDisplayName(RootActor),
+			*CadActorHierarchyUtils::GetActorDisplayName(RootActor),
 			*RootActor->GetClass()->GetName(),
 			ActorSelection.Num(),
 			CountDescendantsRecursive(RootActor));

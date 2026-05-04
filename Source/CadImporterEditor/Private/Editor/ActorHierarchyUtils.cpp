@@ -12,51 +12,6 @@
 
 namespace
 {
-	FString GetHierarchyUtilsActorDisplayName(const AActor* Actor)
-	{
-		return Actor ? Actor->GetActorNameOrLabel() : TEXT("(none)");
-	}
-
-	bool HasStaticMeshContent(AActor* Actor)
-	{
-		if (!Actor)
-		{
-			return false;
-		}
-
-		TInlineComponentArray<UStaticMeshComponent*> MeshComponents(Actor);
-		for (const UStaticMeshComponent* MeshComponent : MeshComponents)
-		{
-			if (MeshComponent && MeshComponent->GetStaticMesh())
-			{
-				return true;
-			}
-		}
-
-		return false;
-	}
-
-	bool HasMeaningfulNonSceneComponents(AActor* Actor)
-	{
-		if (!Actor)
-		{
-			return false;
-		}
-
-		TInlineComponentArray<UActorComponent*> ActorComponents(Actor);
-		for (const UActorComponent* ActorComponent : ActorComponents)
-		{
-			if (!ActorComponent || ActorComponent->IsA<USceneComponent>())
-			{
-				continue;
-			}
-
-			return true;
-		}
-
-		return false;
-	}
-
 	bool IsEmptyHelperActor(AActor* Actor)
 	{
 		if (!Actor)
@@ -64,7 +19,7 @@ namespace
 			return false;
 		}
 
-		return !HasStaticMeshContent(Actor) && !HasMeaningfulNonSceneComponents(Actor);
+		return !CadActorHierarchyUtils::HasStaticMeshContent(Actor) && !CadActorHierarchyUtils::HasMeaningfulNonSceneComponents(Actor);
 	}
 
 	int32 ComputeDepthRelativeToRoot(AActor* Actor, AActor* RootActor)
@@ -155,6 +110,51 @@ namespace
 
 namespace CadActorHierarchyUtils
 {
+	FString GetActorDisplayName(const AActor* Actor)
+	{
+		return Actor ? Actor->GetActorNameOrLabel() : TEXT("(none)");
+	}
+
+	bool HasStaticMeshContent(AActor* Actor)
+	{
+		if (!Actor)
+		{
+			return false;
+		}
+
+		TInlineComponentArray<UStaticMeshComponent*> MeshComponents(Actor);
+		for (const UStaticMeshComponent* MeshComponent : MeshComponents)
+		{
+			if (MeshComponent && MeshComponent->GetStaticMesh())
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	bool HasMeaningfulNonSceneComponents(AActor* Actor)
+	{
+		if (!Actor)
+		{
+			return false;
+		}
+
+		TInlineComponentArray<UActorComponent*> ActorComponents(Actor);
+		for (const UActorComponent* ActorComponent : ActorComponents)
+		{
+			if (!ActorComponent || ActorComponent->IsA<USceneComponent>())
+			{
+				continue;
+			}
+
+			return true;
+		}
+
+		return false;
+	}
+
 	void GetSortedAttachedChildren(
 		AActor* Actor,
 		TArray<AActor*>& OutChildren,
@@ -251,7 +251,7 @@ namespace CadActorHierarchyUtils
 			}
 
 			FCadHierarchyBranchStats BranchStats;
-			BranchStats.BranchName = GetHierarchyUtilsActorDisplayName(ChildActor);
+			BranchStats.BranchName = GetActorDisplayName(ChildActor);
 			BranchStats.BranchPath = ChildActor->GetPathName();
 			BranchStats.bRootHasPayload = !IsEmptyHelperActor(ChildActor);
 			CollectBranchStatsRecursive(ChildActor, 0, BranchStats);
