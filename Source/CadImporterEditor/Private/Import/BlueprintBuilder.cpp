@@ -556,6 +556,167 @@ namespace
 		RobotDefaultObject->ImportRootPlacementHint.WorldScale = Model.RootPlacement.WorldTransform.GetScale3D();
 		RobotDefaultObject->ImportRootPlacementHint.ParentActorName = Model.RootPlacement.ParentActorName;
 	}
+
+	// Create UPhysicsConstraintComponent SCS nodes for each joint, attaching them under the
+	// child link's SCS node. Skips fixed-assembly profiles (handled by the caller).
+	bool BuildJointConstraintComponents(
+		USimpleConstructionScript* SCS,
+		const FCadImportModel& Model,
+		const FString& BaseLinkName,
+		const TMap<FString, USCS_Node*>& LinkNodeByName,
+		const TMap<FString, FTransform>& LinkTransformByName,
+		const TMap<FString, FTransform>& RelativeTransformByChild,
+		const TMap<FString, TArray<FName>>& VisualComponentNamesByLink,
+		const TMap<FName, FTransform>& VisualTransformByComponentName,
+		const TMap<FName, FString>& VisualOwningLinkByComponentName,
+		int32& OutWorldAnchorFallbackCount,
+		FString& OutError)
+	{
+		OutWorldAnchorFallbackCount = 0;
+		TMap<FName, TArray<FName>> ConstraintAdjacency;
+
+		for (int32 JointIndex = 0; JointIndex < Model.Joints.Num(); ++JointIndex)
+		{
+			const FCadImportJoint& Joint = Model.Joints[JointIndex];
+			if (Joint.Child.IsEmpty())
+			{
+				continue;
+			}
+
+			USCS_Node* const* ChildLinkNodePtr = LinkNodeByName.Find(Joint.Child);
+			if (!ChildLinkNodePtr || !(*ChildLinkNodePtr))
+			{
+				UE_LOG(LogCadImporter, Warning, TEXT("Skipping joint component for %s because child link node was not found."), *Joint.Name);
+				continue;
+			}
+
+			const FString EndpointName1 = Joint.ComponentName1.IsEmpty() ? Joint.Parent : Joint.ComponentName1;
+			const FString EndpointName2 = Joint.ComponentName2.IsEmpty() ? Joint.Child : Joint.ComponentName2;
+			const FName ComponentName1 = ResolveJointEndpointComponentName(EndpointName1, VisualComponentNamesByLink);
+			const FName ComponentName2 = ResolveJointEndpointComponentName(EndpointName2, VisualComponentNamesByLink);
+			const bool bIsRootEndpointWithoutVisual = !BaseLinkName.IsEmpty()
+				&& Joint.Parent == BaseLinkName
+				&& !VisualComponentNamesByLink.Contains(BaseLinkName);
+			const bool bAllowWorldAnchorForComponent1 = bIsRootEndpointWithoutVisual && ComponentName1.IsNone();
+
+			if ((!bAllowWorldAnchorForComponent1 && ComponentName1.IsNone()) || ComponentName2.IsNone())
+			{
+				UE_LOG(LogCadImporter, Warning,
+					TEXT("Skipping joint %s because endpoints could not be resolved (component_name1=%s component_name2=%s parent=%s child=%s). Expected link name, LinkName:VisualIndex, or explicit visual component name."),
+					*Joint.Name, *Joint.ComponentName1, *Joint.ComponentName2, *Joint.Parent, *Joint.Child);
+				continue;
+			}
+
+			if (bAllowWorldAnchorForComponent1)
+			{
+				++OutWorldAnchorFallbackCount;
+				UE_LOG(LogCadImporter, Display,
+					TEXT("Joint %s uses world anchor for component_name1 because root link '%s' has no visuals."),
+					*Joint.Name,
+					*BaseLinkName);
+			}
+
+			if (WouldCreateConstraintLoop(ComponentName1, ComponentName2, ConstraintAdjacency))
+			{
+				UE_LOG(LogCadImporter, Warning, TEXT("Skipping joint %s (%s <-> %s) because it would create a constraint loop."),
+					*Joint.Name, *ComponentName1.ToString(), *ComponentName2.ToString());
+				continue;
+			}
+
+			FTransform JointFrameInParentLink = Joint.Transform;
+			if (const FTransform* RelativeJoint = RelativeTransformByChild.Find(Joint.Child))
+			{
+				JointFrameInParentLink = *RelativeJoint;
+			}
+			else if (const FTransform* ChildLinkTransform = LinkTransformByName.Find(Joint.Child))
+			{
+				JointFrameInParentLink = *ChildLinkTransform;
+			}
+			const FTransform JointFrameInChildLink = FTransform::Identity;
+
+			const auto ResolveEndpointOwningLink = [&](const FString& EndpointName, const FName& ComponentName, const FString& FallbackLinkName) -> FString
+			{
+				if (const FString* OwningLink = VisualOwningLinkByComponentName.Find(ComponentName))
+				{
+					return *OwningLink;
+				}
+
+				FString ParsedLinkName;
+				int32 ParsedVisualIndex = INDEX_NONE;
+				if (TryParseJointEndpointVisualIndex(EndpointName, ParsedLinkName, ParsedVisualIndex))
+				{
+					return ParsedLinkName;
+				}
+
+				if (VisualComponentNamesByLink.Contains(EndpointName))
+				{
+					return EndpointName;
+				}
+
+				return FallbackLinkName;
+			};
+
+			const FString EndpointLink1 = ResolveEndpointOwningLink(EndpointName1, ComponentName1, Joint.Parent);
+			const FString EndpointLink2 = ResolveEndpointOwningLink(EndpointName2, ComponentName2, Joint.Child);
+
+			const auto ResolveJointFrameInLink = [&](const FString& LinkName) -> FTransform
+			{
+				if (!Joint.Parent.IsEmpty() && LinkName == Joint.Parent)
+				{
+					return JointFrameInParentLink;
+				}
+				if (!Joint.Child.IsEmpty() && LinkName == Joint.Child)
+				{
+					return JointFrameInChildLink;
+				}
+				return FTransform::Identity;
+			};
+
+			const auto BuildConstraintLocalFrame = [&](const FName& ComponentName, const FString& EndpointLinkName) -> FTransform
+			{
+				const FTransform JointFrameInLink = ResolveJointFrameInLink(EndpointLinkName);
+				if (ComponentName.IsNone())
+				{
+					// ComponentName=None means world anchor; use the constraint component origin.
+					return FTransform::Identity;
+				}
+
+				if (const FTransform* ComponentInLink = VisualTransformByComponentName.Find(ComponentName))
+				{
+					// Joint transforms in JSON are link-relative. Convert to component-local
+					// so constraint pivots stay on link frames instead of mesh pivot centers.
+					return JointFrameInLink.GetRelativeTransform(*ComponentInLink);
+				}
+
+				return JointFrameInLink;
+			};
+
+			const FTransform ComponentFrame1 = BuildConstraintLocalFrame(ComponentName1, EndpointLink1);
+			const FTransform ComponentFrame2 = BuildConstraintLocalFrame(ComponentName2, EndpointLink2);
+
+			USCS_Node* JointNode = SCS->CreateNode(UPhysicsConstraintComponent::StaticClass(), BuildJointComponentName(Joint));
+			if (!JointNode || !JointNode->ComponentTemplate)
+			{
+				OutError = FString::Printf(TEXT("Failed to create physics constraint component for joint: %s"), *Joint.Name);
+				return false;
+			}
+
+			if (UPhysicsConstraintComponent* ConstraintTemplate = Cast<UPhysicsConstraintComponent>(JointNode->ComponentTemplate))
+			{
+				ConstraintTemplate->SetRelativeTransform(FTransform::Identity);
+				ConstraintTemplate->ComponentName1.ComponentName = ComponentName1;
+				ConstraintTemplate->ComponentName2.ComponentName = ComponentName2;
+				ConstraintTemplate->SetConstraintReferenceFrame(EConstraintFrame::Frame1, ComponentFrame1);
+				ConstraintTemplate->SetConstraintReferenceFrame(EConstraintFrame::Frame2, ComponentFrame2);
+				ConfigureJointConstraint(*ConstraintTemplate, Joint, Model.Profile);
+			}
+
+			(*ChildLinkNodePtr)->AddChildNode(JointNode);
+			AddConstraintEdge(ComponentName1, ComponentName2, ConstraintAdjacency);
+		}
+
+		return true;
+	}
 }
 
 UBlueprint* FCadBlueprintBuilder::BuildBlueprint(
@@ -704,7 +865,6 @@ bool FCadBlueprintBuilder::BuildComponents(
 	TMap<FString, TArray<FName>> VisualComponentNamesByLink;
 	TMap<FName, FTransform> VisualTransformByComponentName;
 	TMap<FName, FString> VisualOwningLinkByComponentName;
-	TMap<FName, TArray<FName>> ConstraintAdjacency;
 
 	for (const FCadImportLink& Link : Model.Links)
 	{
@@ -910,8 +1070,6 @@ bool FCadBlueprintBuilder::BuildComponents(
 		}
 	}
 
-	bool bUsedWorldAnchorFallback = false;
-	int32 WorldAnchorFallbackCount = 0;
 	if (bIsFixedAssembly)
 	{
 		// Static assemblies do not create physics constraints or joint drive settings.
@@ -919,148 +1077,24 @@ bool FCadBlueprintBuilder::BuildComponents(
 		return true;
 	}
 
-	for (int32 JointIndex = 0; JointIndex < Model.Joints.Num(); ++JointIndex)
+	int32 WorldAnchorFallbackCount = 0;
+	if (!BuildJointConstraintComponents(
+		SCS,
+		Model,
+		BaseLinkName,
+		LinkNodeByName,
+		LinkTransformByName,
+		RelativeTransformByChild,
+		VisualComponentNamesByLink,
+		VisualTransformByComponentName,
+		VisualOwningLinkByComponentName,
+		WorldAnchorFallbackCount,
+		OutError))
 	{
-		const FCadImportJoint& Joint = Model.Joints[JointIndex];
-		if (Joint.Child.IsEmpty())
-		{
-			continue;
-		}
-
-		USCS_Node** ChildLinkNodePtr = LinkNodeByName.Find(Joint.Child);
-		if (!ChildLinkNodePtr || !(*ChildLinkNodePtr))
-		{
-			UE_LOG(LogCadImporter, Warning, TEXT("Skipping joint component for %s because child link node was not found."), *Joint.Name);
-			continue;
-		}
-
-		const FString EndpointName1 = Joint.ComponentName1.IsEmpty() ? Joint.Parent : Joint.ComponentName1;
-		const FString EndpointName2 = Joint.ComponentName2.IsEmpty() ? Joint.Child : Joint.ComponentName2;
-		const FName ComponentName1 = ResolveJointEndpointComponentName(EndpointName1, VisualComponentNamesByLink);
-		const FName ComponentName2 = ResolveJointEndpointComponentName(EndpointName2, VisualComponentNamesByLink);
-		const bool bIsRootEndpointWithoutVisual = !BaseLinkName.IsEmpty()
-			&& Joint.Parent == BaseLinkName
-			&& !VisualComponentNamesByLink.Contains(BaseLinkName);
-		const bool bAllowWorldAnchorForComponent1 = bIsRootEndpointWithoutVisual && ComponentName1.IsNone();
-
-		if ((!bAllowWorldAnchorForComponent1 && ComponentName1.IsNone()) || ComponentName2.IsNone())
-		{
-			UE_LOG(LogCadImporter, Warning,
-				TEXT("Skipping joint %s because endpoints could not be resolved (component_name1=%s component_name2=%s parent=%s child=%s). Expected link name, LinkName:VisualIndex, or explicit visual component name."),
-				*Joint.Name, *Joint.ComponentName1, *Joint.ComponentName2, *Joint.Parent, *Joint.Child);
-			continue;
-		}
-
-		if (bAllowWorldAnchorForComponent1)
-		{
-			bUsedWorldAnchorFallback = true;
-			++WorldAnchorFallbackCount;
-			UE_LOG(LogCadImporter, Display,
-				TEXT("Joint %s uses world anchor for component_name1 because root link '%s' has no visuals."),
-				*Joint.Name,
-				*BaseLinkName);
-		}
-
-		if (WouldCreateConstraintLoop(ComponentName1, ComponentName2, ConstraintAdjacency))
-		{
-			UE_LOG(LogCadImporter, Warning, TEXT("Skipping joint %s (%s <-> %s) because it would create a constraint loop."),
-				*Joint.Name, *ComponentName1.ToString(), *ComponentName2.ToString());
-			continue;
-		}
-
-		FTransform JointFrameInParentLink = Joint.Transform;
-		if (const FTransform* RelativeJoint = RelativeTransformByChild.Find(Joint.Child))
-		{
-			JointFrameInParentLink = *RelativeJoint;
-		}
-		else if (const FTransform* ChildLinkTransform = LinkTransformByName.Find(Joint.Child))
-		{
-			JointFrameInParentLink = *ChildLinkTransform;
-		}
-		const FTransform JointFrameInChildLink = FTransform::Identity;
-
-		const auto ResolveEndpointOwningLink = [&](const FString& EndpointName, const FName& ComponentName, const FString& FallbackLinkName) -> FString
-		{
-			if (const FString* OwningLink = VisualOwningLinkByComponentName.Find(ComponentName))
-			{
-				return *OwningLink;
-			}
-
-			FString ParsedLinkName;
-			int32 ParsedVisualIndex = INDEX_NONE;
-			if (TryParseJointEndpointVisualIndex(EndpointName, ParsedLinkName, ParsedVisualIndex))
-			{
-				return ParsedLinkName;
-			}
-
-			if (VisualComponentNamesByLink.Contains(EndpointName))
-			{
-				return EndpointName;
-			}
-
-			return FallbackLinkName;
-		};
-
-		const FString EndpointLink1 = ResolveEndpointOwningLink(EndpointName1, ComponentName1, Joint.Parent);
-		const FString EndpointLink2 = ResolveEndpointOwningLink(EndpointName2, ComponentName2, Joint.Child);
-
-		const auto ResolveJointFrameInLink = [&](const FString& LinkName) -> FTransform
-		{
-			if (!Joint.Parent.IsEmpty() && LinkName == Joint.Parent)
-			{
-				return JointFrameInParentLink;
-			}
-			if (!Joint.Child.IsEmpty() && LinkName == Joint.Child)
-			{
-				return JointFrameInChildLink;
-			}
-			return FTransform::Identity;
-		};
-
-		const auto BuildConstraintLocalFrame = [&](const FName& ComponentName, const FString& EndpointLinkName) -> FTransform
-		{
-			const FTransform JointFrameInLink = ResolveJointFrameInLink(EndpointLinkName);
-			if (ComponentName.IsNone())
-			{
-				// ComponentName=None means world anchor; use the constraint component origin.
-				return FTransform::Identity;
-			}
-
-			if (const FTransform* ComponentInLink = VisualTransformByComponentName.Find(ComponentName))
-			{
-				// Joint transforms in JSON are link-relative. Convert to component-local
-				// so constraint pivots stay on link frames instead of mesh pivot centers.
-				return JointFrameInLink.GetRelativeTransform(*ComponentInLink);
-			}
-
-			return JointFrameInLink;
-		};
-
-		const FTransform ComponentFrame1 = BuildConstraintLocalFrame(ComponentName1, EndpointLink1);
-		const FTransform ComponentFrame2 = BuildConstraintLocalFrame(ComponentName2, EndpointLink2);
-
-		USCS_Node* JointNode = SCS->CreateNode(UPhysicsConstraintComponent::StaticClass(), BuildJointComponentName(Joint));
-		if (!JointNode || !JointNode->ComponentTemplate)
-		{
-			OutError = FString::Printf(TEXT("Failed to create physics constraint component for joint: %s"), *Joint.Name);
-			return false;
-		}
-
-		if (UPhysicsConstraintComponent* ConstraintTemplate = Cast<UPhysicsConstraintComponent>(JointNode->ComponentTemplate))
-		{
-			ConstraintTemplate->SetRelativeTransform(FTransform::Identity);
-			ConstraintTemplate->ComponentName1.ComponentName = ComponentName1;
-			ConstraintTemplate->ComponentName2.ComponentName = ComponentName2;
-			ConstraintTemplate->SetConstraintReferenceFrame(EConstraintFrame::Frame1, ComponentFrame1);
-			ConstraintTemplate->SetConstraintReferenceFrame(EConstraintFrame::Frame2, ComponentFrame2);
-			ConfigureJointConstraint(*ConstraintTemplate, Joint, Model.Profile);
-		}
-
-		(*ChildLinkNodePtr)->AddChildNode(JointNode);
-		AddConstraintEdge(ComponentName1, ComponentName2, ConstraintAdjacency);
+		return false;
 	}
 
-	if (bUsedWorldAnchorFallback)
+	if (WorldAnchorFallbackCount > 0)
 	{
 		FMessageDialog::Open(
 			EAppMsgType::Ok,
